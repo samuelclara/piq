@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Piq shows the photos in the album you pick so you can sort them, and moves the ones you mark to Recently Deleted when you empty the trash.</string>
+	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
+	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>BricolageGrotesque-SemiBold.ttf</string>
+		<string>BricolageGrotesque-Bold.ttf</string>
+		<string>BricolageGrotesque_36pt-SemiBold.ttf</string>
+		<string>BricolageGrotesque_36pt-Bold.ttf</string>
+		<string>HankenGrotesk-Regular.ttf</string>
+		<string>HankenGrotesk-Medium.ttf</string>
+		<string>HankenGrotesk-SemiBold.ttf</string>
+		<string>HankenGrotesk-Bold.ttf</string>
+	</array>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleLightContent</string>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIUserInterfaceStyle</key>
+	<string>Dark</string>
+</dict>
+</plist>

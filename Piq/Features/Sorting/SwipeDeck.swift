@@ -1,0 +1,361 @@
+import Observation
+import SwiftUI
+
+/// The sorting screen's stack of photo cards: the drag of the front card, the cards flying off
+/// the stage, and the moment each decision reaches the session.
+///
+/// A decision commits as soon as its card has flown off the stage. If another input arrives
+/// first (a button, an arrow key, a new drag or Undo), the flight in progress is settled right
+/// away, so no input is dropped and no photo is ever decided twice. The card keeps flying either
+/// way.
+@MainActor
+@Observable
+final class SwipeDeck {
+    /// A card on its way off the stage.
+    struct Departure: Identifiable {
+        /// The photo's asset ID.
+        let id: String
+        let action: SwipeAction
+        /// Where the card is headed, relative to its resting place.
+        var offset: CGSize
+        /// The card's images, kept while it flies even though the loader has moved on.
+        let slot: PhotoSlot?
+        /// Whether the session has the decision yet.
+        var isCommitted = false
+        /// Tells two flights of the same photo apart (it can fly, come back on Undo, fly again).
+        let flight: Int
+    }
+
+    /// The photo sliding back in after an undo, and the side it comes back from.
+    struct Return: Equatable {
+        let id: String
+        let direction: SwipeAction.Direction
+    }
+
+    /// How long a card takes to clear the stage, plus a frame for its animation to start.
+    private static let flightTime: Duration = .seconds(Metrics.flyOffDuration) + .milliseconds(17)
+
+    let session: SessionController
+    let loader: PhotoWindowLoader
+
+    /// The card under the finger.
+    private(set) var draggedID: String?
+    /// How far the finger has moved that card. Only the front card reads it, so a drag redraws
+    /// one card per frame and nothing else.
+    private(set) var dragTranslation: CGSize = .zero
+    /// Cards flying off, oldest first.
+    private(set) var departures: [Departure] = []
+    /// Set by an undo so the photo that comes back slides in from the side it left.
+    private(set) var returning: Return?
+    /// The images of the photo decided last, so Undo brings it back sharp while the loader
+    /// fetches it again. One photo at most: replaced by the next decision, and let go once the
+    /// loader has the photo sharp again or the screen goes away.
+    private(set) var lastDeparted: PhotoSlot?
+
+    /// Mirrors the Reduce Motion setting: no flights, decisions commit with a quick crossfade.
+    @ObservationIgnored var reduceMotion = false
+    @ObservationIgnored private let app: AppModel
+    @ObservationIgnored private var stageSize: CGSize = .zero
+    @ObservationIgnored private var boxSize: CGSize = .zero
+    @ObservationIgnored private var flightCount = 0
+    /// Whether the screen is up. While it is away (Review on top), the deck loads no images.
+    @ObservationIgnored private var isShowing = false
+
+    init(session: SessionController, app: AppModel) {
+        self.session = session
+        self.app = app
+        self.loader = PhotoWindowLoader(images: app.images, library: app.library)
+    }
+
+    // MARK: Lifecycle
+
+    /// The screen is up: loads the current photo and the next ones.
+    func appear() {
+        isShowing = true
+        show(session.state.window(lookahead: PhotoWindowLoader.lookahead))
+    }
+
+    /// Loads `window` (the current photo and the next ones) and releases every other photo.
+    func show(_ window: [String]) {
+        guard isShowing else { return }
+        loader.show(window)
+    }
+
+    /// The screen is gone (Review on top, or back to the albums): settles everything and lets
+    /// go of every image, including the flying cards' and the one kept for Undo.
+    func disappear() {
+        isShowing = false
+        finish()
+        departures.removeAll()
+        loader.releaseAll()
+    }
+
+    // MARK: Reading
+
+    /// The flight whose decision hasn't reached the session yet. There is at most one: any new
+    /// input commits it first.
+    var pendingDeparture: Departure? {
+        departures.first { !$0.isCommitted }
+    }
+
+    /// Whether Undo has something to take back: a decision, or a card still in the air.
+    var canUndo: Bool {
+        session.state.canUndo || pendingDeparture != nil
+    }
+
+    /// The photo in front of the stack and the one behind it. As soon as a card starts flying
+    /// off, the next photo moves to the front.
+    var stack: (front: String?, behind: String?) {
+        var ids = session.state.window(lookahead: 2)
+        if let pending = pendingDeparture, ids.first == pending.id {
+            ids.removeFirst()
+        }
+        return (ids.first, ids.dropFirst().first)
+    }
+
+    /// The images for a card. A flying card keeps its own; a photo coming back on Undo shows the
+    /// ones it left with until the loader has its sharp image again.
+    func slot(for id: String) -> PhotoSlot? {
+        if let departure = departures.first(where: { $0.id == id }) {
+            return departure.slot
+        }
+        let live = loader.slot(for: id)
+        if let kept = lastDeparted, kept.id == id, live?.isSharp != true {
+            return kept
+        }
+        return live
+    }
+
+    /// Whether the loader has loaded the photo kept for Undo again, sharp (it came back), so the
+    /// kept images are a second copy. Right after the decision the loader may still hold the
+    /// very same slot, which doesn't count.
+    var hasReloadedLastDeparted: Bool {
+        guard let kept = lastDeparted, let live = loader.slot(for: kept.id) else { return false }
+        return live !== kept && live.isSharp
+    }
+
+    /// Lets go of the images kept for Undo once the loader has that photo again.
+    func releaseLastDeparted() {
+        guard hasReloadedLastDeparted else { return }
+        lastDeparted = nil
+    }
+
+    /// How far a card travels to leave the stage completely, shadow and tilt included.
+    var flightDistance: CGFloat {
+        stageSize.width / 2 + boxSize.width / 2 + 80
+    }
+
+    /// The stage reports its size so flights know how far to go.
+    func setStage(_ size: CGSize, box: CGSize) {
+        stageSize = size
+        boxSize = box
+    }
+
+    // MARK: Dragging
+
+    func dragChanged(_ id: String, translation: CGSize) {
+        if draggedID != id {
+            // A new drag: a card still in the air is decided now, so this one is current.
+            commitPending()
+            guard id == session.state.currentAssetID else { return }
+            draggedID = id
+            returning = nil
+        }
+        dragTranslation = translation
+    }
+
+    /// Past the threshold the card flies off that side; short of it, it springs back.
+    func dragEnded(_ id: String, translation: CGSize) {
+        guard draggedID == id else { return }
+        if abs(translation.width) >= Metrics.swipeThreshold {
+            let action = SwipeAction.action(for: translation.width < 0 ? .left : .right)
+            send(id, action, from: translation)
+        } else {
+            springBack()
+        }
+    }
+
+    /// The touch went away without ending the gesture (the system took it, the card left the
+    /// screen). Harmless after `dragEnded`.
+    func dragCancelled(_ id: String) {
+        guard draggedID == id else { return }
+        springBack()
+    }
+
+    private func springBack() {
+        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.35, dampingFraction: 0.7)) {
+            draggedID = nil
+            dragTranslation = .zero
+        }
+    }
+
+    // MARK: Deciding
+
+    /// Decides the current photo: the card flies off toward `action`'s side and the decision
+    /// commits once it's gone (right away, with a crossfade, under Reduce Motion).
+    func decide(_ action: SwipeAction) {
+        commitPending()
+        guard let id = session.state.currentAssetID else { return }
+        send(id, action, from: draggedID == id ? dragTranslation : .zero)
+    }
+
+    /// Decides the current photo right away, without the flight (VoiceOver actions).
+    func decideNow(_ action: SwipeAction) {
+        commitPending()
+        guard let id = session.state.currentAssetID else { return }
+        crossfade(id, action)
+    }
+
+    /// Takes back the last decision. A card still in the air turns around; otherwise the
+    /// session steps back and the photo slides in from the side it left.
+    func undo() {
+        let animation: Animation = reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.42, dampingFraction: 0.8)
+        if let index = departures.firstIndex(where: { !$0.isCommitted }) {
+            withAnimation(animation) {
+                endDrag()
+                departures.remove(at: index)
+            }
+            return
+        }
+        guard session.state.canUndo else { return }
+        withAnimation(animation) {
+            endDrag()
+            guard let decision = session.undo() else { return }
+            if let index = departures.firstIndex(where: { $0.id == decision.assetID }) {
+                departures.remove(at: index)
+                returning = nil
+            } else {
+                returning = Return(id: decision.assetID, direction: decision.action.direction)
+            }
+            withdrawConfirmation(of: decision)
+        }
+    }
+
+    /// Commits the card in flight now (the card keeps flying).
+    func commitPending() {
+        guard let index = departures.firstIndex(where: { !$0.isCommitted }) else { return }
+        commitFlight(at: index)
+    }
+
+    /// The session's current photo changed underneath the deck (a library change): a drag on
+    /// another photo is over.
+    func currentPhotoChanged(to id: String?) {
+        guard draggedID != nil, draggedID != id else { return }
+        endDrag()
+    }
+
+    /// Settles everything before the screen goes away: the card in the air is decided, a drag
+    /// ends, and the images kept for Undo are let go.
+    func finish() {
+        commitPending()
+        endDrag()
+        lastDeparted = nil
+    }
+
+    // MARK: Private
+
+    private func send(_ id: String, _ action: SwipeAction, from start: CGSize) {
+        returning = nil
+        guard !reduceMotion else {
+            crossfade(id, action)
+            return
+        }
+        flightCount += 1
+        let flight = flightCount
+        let departure = Departure(id: id, action: action, offset: flightTarget(from: start, toward: action.direction), slot: slot(for: id), flight: flight)
+        withAnimation(.easeIn(duration: Metrics.flyOffDuration)) {
+            endDrag()
+            departures.append(departure)
+        } completion: { [weak self] in
+            // This waits for the next card to settle in front too; the departed card has long
+            // been off screen.
+            self?.remove(flight)
+        }
+        // The decision lands as the card clears the stage, not once the next card has settled.
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.flightTime)
+            self?.land(flight)
+        }
+    }
+
+    /// Commits in place: the card fades out where it is and the next one fades up.
+    private func crossfade(_ id: String, _ action: SwipeAction) {
+        returning = nil
+        let slot = slot(for: id)
+        withAnimation(.easeInOut(duration: 0.2)) {
+            endDrag()
+            commit(id, action, slot: slot)
+        }
+    }
+
+    /// A card has left the stage: its decision commits, unless another input already did.
+    private func land(_ flight: Int) {
+        guard let index = departures.firstIndex(where: { $0.flight == flight }) else { return }
+        commitFlight(at: index)
+    }
+
+    /// The flight's animations are over: the card, off screen, goes away. Its decision is in by
+    /// now, unless nothing animated (the screen was covered), in which case it commits here.
+    private func remove(_ flight: Int) {
+        land(flight)
+        departures.removeAll { $0.flight == flight }
+    }
+
+    private func commitFlight(at index: Int) {
+        guard !departures[index].isCommitted else { return }
+        departures[index].isCommitted = true
+        let departure = departures[index]
+        commit(departure.id, departure.action, slot: departure.slot)
+    }
+
+    private func commit(_ id: String, _ action: SwipeAction, slot: PhotoSlot?) {
+        // Decide the photo that flew, so a library change underneath can't misapply it.
+        guard let decision = session.decide(action, for: id) else { return }
+        lastDeparted = slot
+        // The toast and the move to Review belong to the sorting screen. A card that lands after
+        // the app closed the screen (Photos access lost, the album gone) still counts, quietly:
+        // it mustn't cover the app's explanation or open Review over the albums.
+        guard isOnTop else { return }
+        if let message = decision.action.confirmationMessage {
+            app.toasts.show(message)
+        }
+        if session.state.isComplete {
+            app.showReview()
+        }
+    }
+
+    /// Whether the sorting screen is the top screen.
+    private var isOnTop: Bool {
+        app.path.last == .sorting(albumID: session.albumID)
+    }
+
+    /// Takes down the toast that confirmed `decision` ("Marked for deletion") once Undo has
+    /// reversed it.
+    private func withdrawConfirmation(of decision: SortDecision) {
+        guard let message = decision.action.confirmationMessage,
+              let toast = app.toasts.current, toast.message == message else { return }
+        app.toasts.dismiss(toast.id)
+    }
+
+    private func endDrag() {
+        draggedID = nil
+        dragTranslation = .zero
+    }
+
+    /// Fully off the stage on `direction`'s side. A thrown card keeps heading the way the finger
+    /// moved it.
+    private func flightTarget(from start: CGSize, toward direction: SwipeAction.Direction) -> CGSize {
+        let x = direction.sign * max(flightDistance, abs(start.width))
+        let ratio = abs(start.width) >= Metrics.swipeThreshold ? abs(x / start.width) : 1
+        let limit = stageSize.height * 0.6
+        return CGSize(width: x, height: min(max(start.height * ratio, -limit), limit))
+    }
+
+    #if DEBUG
+    /// Holds the current card mid-swipe, for previews.
+    func holdDrag(_ translation: CGSize) {
+        draggedID = session.state.currentAssetID
+        dragTranslation = translation
+    }
+    #endif
+}
