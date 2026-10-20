@@ -13,3 +13,9 @@ xcuserdata/
 
 # macOS
 .DS_Store
+
+# Personal signing team (see Config/Local.xcconfig.example)
+Config/Local.xcconfig
+
+# Working notes
+rawspecs/

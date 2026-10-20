@@ -1,0 +1,6 @@
+// Signing settings for every target. The development team is personal, so it isn't committed:
+// copy Local.xcconfig.example to Local.xcconfig (git ignores it) and put your team ID there.
+// Without it, Xcode asks for a team when you build for a device.
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"

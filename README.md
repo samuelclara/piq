@@ -53,16 +53,19 @@ in-memory session store, so end-to-end tests don't resume an earlier run's sessi
 1. **Turn on Developer Mode** on the iPad (*Settings › Privacy & Security › Developer Mode*),
    then connect it to your Mac with a cable (or pair it over Wi‑Fi in Xcode's *Devices and
    Simulators* window).
-2. **Pick a signing team.** In Xcode, select the *Piq* project, then the *Piq* target,
-   *Signing & Capabilities*. Leave *Automatically manage signing* on and choose your team. A free
-   Apple ID ("Personal Team") works.
+2. **Set your signing team.** Copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig`
+   and put your team ID in it (Xcode › Settings › Accounts shows it, or developer.apple.com ›
+   Membership). Git ignores that file, so your team ID stays out of the repo; every target reads
+   it through `Config/Signing.xcconfig`. A free Apple ID ("Personal Team") works. Leave
+   *Automatically manage signing* on. (Picking a team in *Signing & Capabilities* also works, but
+   Xcode then writes it into the project file.)
 3. **Make the bundle identifier yours.** `io.belleville.piq` must be unique to your team; if
    Xcode reports it's unavailable, change it (for example to `com.yourname.piq`).
 4. Choose your iPad as the run destination and press Run. With a free Apple ID, the first launch
    needs you to trust your developer certificate on the iPad (*Settings › General › VPN & Device
    Management*).
 
-From the command line, once a team is set (or by passing it):
+From the command line, once `Config/Local.xcconfig` is set (or by passing the team):
 
 ```sh
 xcodebuild -project Piq.xcodeproj -scheme Piq \
