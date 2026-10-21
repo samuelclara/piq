@@ -4,6 +4,9 @@ import SwiftUI
 /// "Start sorting · 400 photos" / "Resume · 38 of 400" button on the right (see `startTitle`).
 struct PickerBottomBar: View {
     let layout: PickerLayout
+    /// Whether Return presses the start button: not while the search field has the keyboard,
+    /// where Return ends the search.
+    var acceptsReturn = true
 
     @Environment(AppModel.self) private var app
 
@@ -56,7 +59,7 @@ struct PickerBottomBar: View {
         .accessibilityLabel(title.spoken)
         .accessibilityValue(isOpening ? "Opening" : "")
         // Only while the picker is on screen, so Return can't reopen an album from a pushed screen.
-        .keyboardShortcut(app.path.isEmpty ? .defaultAction : nil)
+        .keyboardShortcut(app.path.isEmpty && acceptsReturn ? .defaultAction : nil)
         .accessibilityIdentifier(A11yID.Picker.startButton)
     }
 

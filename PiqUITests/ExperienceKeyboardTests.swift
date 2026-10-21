@@ -111,13 +111,15 @@ final class ExperienceKeyboardTests: ExperienceTestCase {
     /// from the picker, ← still decides on sorting and ⌘A still selects on Review.
     ///
     /// On iPadOS, Tab moves between buttons only with Full Keyboard Access, which follows the
-    /// VoiceOver order; without it, Tab reaches text fields, and Piq has none. (XCUITest can't
-    /// drive Full Keyboard Access: its synthesized keys never move the Full Keyboard Access focus.)
+    /// VoiceOver order; without it, Tab reaches text fields: the picker's search field, where
+    /// Return ends the search and which Escape (⌘.) leaves. (XCUITest can't drive Full Keyboard
+    /// Access: its synthesized keys never move the Full Keyboard Access focus.)
     func testTabTakesNoScreensKeys() {
         let app = launch(scenario: "resume")
         XCTAssertTrue(app.buttons[ID.start].waitForExistence(timeout: 5))
         wakeKeyboard(app)
         pressTab(3, in: app)
+        press(".", .command, in: app)
         pressReturn(app)
         expectSorting(app, position: 38, total: 400, marked: 4)
 

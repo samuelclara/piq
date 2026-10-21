@@ -199,7 +199,8 @@ final class StateAccessTests: XCTestCase {
 
     /// Recents stays listed under limited access, with only the selected photos. The photos
     /// already sorted (and the trash) stay in the session even if they're hidden now; only the
-    /// queue follows what Piq can see. Back with full access, nothing was lost.
+    /// queue follows what Piq can see. Back with full access, nothing was lost, and the photo on
+    /// screen stays on screen, the photos that come back queued after it in album order.
     func testSwitchingToLimitedAndBackKeepsTheSortedPhotosOfASmartAlbum() async throws {
         let (app, library) = try await startedApp()
         let recents = try album("Recents", in: app)
@@ -224,8 +225,13 @@ final class StateAccessTests: XCTestCase {
         library.access = .authorized
         await app.refreshAccess()
 
-        XCTAssertEqual(session.state, full, "back to exactly where it was")
-        XCTAssertEqual(try savedSessions(in: app.container).first?.state, full)
+        let onScreen = visible[30]
+        XCTAssertEqual(session.state.currentAssetID, onScreen, "the photo on screen stays")
+        XCTAssertEqual(session.state.history, full.history, "every decision as it was")
+        XCTAssertEqual(session.state.decisions, full.decisions)
+        XCTAssertEqual(session.state.markedIDs, full.markedIDs, "and the trash")
+        XCTAssertEqual(session.state.assetIDs, full.history.map(\.assetID) + [onScreen] + full.assetIDs.dropFirst(40).filter { $0 != onScreen })
+        XCTAssertEqual(try savedSessions(in: app.container).first?.state, session.state)
     }
 
     /// A session started under limited access gets the rest of the album queued once Piq has

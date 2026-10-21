@@ -2,12 +2,13 @@ import Observation
 import SwiftUI
 
 /// The sorting screen's stack of photo cards: the drag of the front card, the cards flying off
-/// the stage, and the moment each decision reaches the session.
+/// the stage, the moment each decision reaches the session, and the moves of Previous and Next.
 ///
 /// A decision commits as soon as its card has flown off the stage. If another input arrives
-/// first (a button, an arrow key, a new drag or Undo), the flight in progress is settled right
-/// away, so no input is dropped and no photo is ever decided twice. The card keeps flying either
-/// way.
+/// first (a button, an arrow key, a new drag, Undo, Previous or Next), the flight in progress is
+/// settled right away, so no input is dropped and no photo is ever decided twice. The card keeps
+/// flying either way. A move decides nothing: the session moves at once, and the card it leaves
+/// slides off flat and untinted, so it never reads as a swipe.
 @MainActor
 @Observable
 final class SwipeDeck {
@@ -15,7 +16,8 @@ final class SwipeDeck {
     struct Departure: Identifiable {
         /// The photo's asset ID.
         let id: String
-        let action: SwipeAction
+        /// The decision it carries; nil for a card that Next moved on from.
+        let action: SwipeAction?
         /// Where the card is headed, relative to its resting place.
         var offset: CGSize
         /// The card's images, kept while it flies even though the loader has moved on.
@@ -26,10 +28,12 @@ final class SwipeDeck {
         let flight: Int
     }
 
-    /// The photo sliding back in after an undo, and the side it comes back from.
+    /// The photo sliding back in after an undo or Previous, and the side it comes back from.
     struct Return: Equatable {
         let id: String
         let direction: SwipeAction.Direction
+        /// Tilted as a swipe would (Undo), or flat (Previous, which decides nothing).
+        var tilts = true
     }
 
     /// How long a card takes to clear the stage, plus a frame for its animation to start.
@@ -45,11 +49,14 @@ final class SwipeDeck {
     private(set) var dragTranslation: CGSize = .zero
     /// Cards flying off, oldest first.
     private(set) var departures: [Departure] = []
-    /// Set by an undo so the photo that comes back slides in from the side it left.
+    /// Set by an undo so the photo that comes back slides in from the side it left, and by
+    /// Previous so the earlier photo slides in from the left.
     private(set) var returning: Return?
-    /// The images of the photo decided last, so Undo brings it back sharp while the loader
-    /// fetches it again. One photo at most: replaced by the next decision, and let go once the
-    /// loader has the photo sharp again or the screen goes away.
+    /// The images of the photo that left the front last (decided, or moved on from with Next), so
+    /// Undo or Previous brings it back sharp while the loader fetches it again. One photo at most:
+    /// replaced by the next one to leave, except that Next leaves the photo Undo returns to in
+    /// place (see `keepsUndoTarget`), and let go once the loader has the photo sharp again or the
+    /// screen goes away.
     private(set) var lastDeparted: PhotoSlot?
 
     /// Mirrors the Reduce Motion setting: no flights, decisions commit with a quick crossfade.
@@ -103,6 +110,16 @@ final class SwipeDeck {
         session.state.canUndo || pendingDeparture != nil
     }
 
+    /// Whether Previous has a photo to go back to (a card in the air counts: it lands first).
+    var canGoBack: Bool {
+        session.state.canGoBack || pendingDeparture != nil
+    }
+
+    /// Whether Next has a photo to move on from (on the last one, Next goes on to Review).
+    var canGoForward: Bool {
+        session.state.canGoForward
+    }
+
     /// The photo in front of the stack and the one behind it. As soon as a card starts flying
     /// off, the next photo moves to the front.
     var stack: (front: String?, behind: String?) {
@@ -124,6 +141,16 @@ final class SwipeDeck {
             return kept
         }
         return live
+    }
+
+    /// The details of `id` for VoiceOver: the loader's, or, for a photo that has only just come
+    /// into the window (Previous lands on one the loader had let go), the library's at once
+    /// rather than whenever the loader gets to them.
+    func metadata(for id: String) async -> PhotoMetadata? {
+        if let metadata = slot(for: id)?.metadata {
+            return metadata
+        }
+        return await app.library.metadata(for: [id])[id]
     }
 
     /// Whether the loader has loaded the photo kept for Undo again, sharp (it came back), so the
@@ -231,6 +258,52 @@ final class SwipeDeck {
         }
     }
 
+    /// Previous or Next: the session moves without deciding anything. The card on screen slides
+    /// off flat toward the side the move goes (Next sends it left, as the next photo comes up
+    /// from behind; Previous brings the earlier photo in from the left, over it), with a
+    /// crossfade under Reduce Motion. Next past the last photo goes on to Review, as the last
+    /// decision does.
+    func step(_ step: PhotoStep) {
+        commitPending()
+        guard isOnTop else { return }
+        let state = session.state
+        let leaving = state.currentAssetID
+        let leavingSlot = leaving.flatMap { slot(for: $0) }
+        let animation: Animation = reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.38, dampingFraction: 0.86)
+        flightCount += 1
+        let flight = flightCount
+        var moved = false
+        withAnimation(animation) {
+            endDrag()
+            guard session.step(step) else { return }
+            moved = true
+            let arriving = session.state.currentAssetID
+            if let arriving, let index = departures.firstIndex(where: { $0.id == arriving }) {
+                // Back before it finished sliding off: the same card slides back.
+                departures.remove(at: index)
+                returning = nil
+            } else if step == .previous, let arriving {
+                returning = Return(id: arriving, direction: .left, tilts: false)
+            } else {
+                returning = nil
+            }
+            if step == .next, let leaving, !reduceMotion {
+                let offset = CGSize(width: -flightDistance, height: 0)
+                departures.append(Departure(id: leaving, action: nil, offset: offset, slot: leavingSlot, isCommitted: true, flight: flight))
+            }
+        } completion: { [weak self] in
+            // Off the stage by now.
+            self?.departures.removeAll { $0.flight == flight }
+        }
+        guard moved else { return }
+        if step == .next, let leavingSlot, !keepsUndoTarget(over: leavingSlot) {
+            lastDeparted = leavingSlot
+        }
+        if session.state.currentAssetID == nil {
+            app.showReview()
+        }
+    }
+
     /// Commits the card in flight now (the card keeps flying).
     func commitPending() {
         guard let index = departures.firstIndex(where: { !$0.isCommitted }) else { return }
@@ -305,7 +378,8 @@ final class SwipeDeck {
         guard !departures[index].isCommitted else { return }
         departures[index].isCommitted = true
         let departure = departures[index]
-        commit(departure.id, departure.action, slot: departure.slot)
+        guard let action = departure.action else { return }
+        commit(departure.id, action, slot: departure.slot)
     }
 
     private func commit(_ id: String, _ action: SwipeAction, slot: PhotoSlot?) {
@@ -319,9 +393,20 @@ final class SwipeDeck {
         if let message = decision.action.confirmationMessage {
             app.toasts.show(message)
         }
-        if session.state.isComplete {
+        // Every photo decided, or past the last one with some skipped: Review says what is left.
+        if session.state.isComplete || session.state.currentAssetID == nil {
             app.showReview()
         }
+    }
+
+    /// Whether the kept images are those of the photo Undo would bring back, which Next then
+    /// leaves in place rather than keep `leaving`'s: a decision followed by Next still undoes
+    /// sharp (as before Previous and Next existed), while Previous back to the photo Next left
+    /// loads it again, from the library's stored preview first. Once Undo or Previous has brought
+    /// the kept photo back and the loader has it, the slot is free again.
+    private func keepsUndoTarget(over leaving: PhotoSlot) -> Bool {
+        guard let kept = lastDeparted, kept.id != leaving.id else { return false }
+        return kept.id == session.state.lastDecision?.assetID
     }
 
     /// Whether the sorting screen is the top screen.

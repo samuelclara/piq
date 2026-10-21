@@ -14,6 +14,8 @@ final class SessionController: Identifiable {
     enum Change: Equatable {
         case decided(SortDecision)
         case undone(SortDecision)
+        /// Previous or Next: the cursor moved, nothing was decided.
+        case moved(PhotoStep)
         case restored(count: Int)
         case trashEmptied(count: Int)
         case reconciled
@@ -60,26 +62,48 @@ final class SessionController: Identifiable {
 
     // MARK: Sorting
 
-    /// Applies `action` to the photo on screen. Pass the asset the person was looking at, so a
-    /// library change underneath can't make the decision land on a different photo.
+    /// Applies `action` to the photo on screen (replacing its earlier decision, if it had one)
+    /// and moves on. Pass the asset the person was looking at, so a library change underneath
+    /// can't make the decision land on a different photo.
     @discardableResult
     func decide(_ action: SwipeAction, for assetID: String? = nil) -> SortDecision? {
         if let assetID, assetID != state.currentAssetID { return nil }
+        let position = state.currentIndex
         guard let decision = state.apply(action) else { return nil }
         lastChange = .decided(decision)
-        record.recordDecision(action, at: state.sortedCount - 1, inTrash: state.isMarked(decision.assetID))
+        record.recordDecision(decision, at: position, inTrash: state.isMarked(decision.assetID), cursor: state.currentIndex)
         store.save()
         return decision
     }
 
-    /// Goes back to the previous photo and reverses its decision.
+    /// Goes back to the photo of the last decision and reverses it (puts back the decision it
+    /// replaced, if any).
     @discardableResult
     func undo() -> SortDecision? {
         guard let decision = state.undo() else { return nil }
         lastChange = .undone(decision)
-        record.keepDecisions(state.sortedCount)
+        record.recordUndo(of: decision, at: state.currentIndex, cursor: state.currentIndex)
         store.save()
         return decision
+    }
+
+    /// Moves to the previous or next photo without deciding anything (not undoable). Saved like a
+    /// decision, so a relaunch finds the same place. Returns whether the cursor moved.
+    @discardableResult
+    func step(_ step: PhotoStep) -> Bool {
+        guard state.step(step) else { return false }
+        lastChange = .moved(step)
+        record.recordCursor(state.currentIndex)
+        store.save()
+        return true
+    }
+
+    /// Puts the cursor on the first unsorted photo, where "Resume" and "Continue sorting" pick
+    /// up (past the last photo when every one is decided).
+    func goToFirstUnsorted() {
+        guard state.goToFirstUnsorted() else { return }
+        record.recordCursor(state.currentIndex)
+        store.save()
     }
 
     // MARK: Trash

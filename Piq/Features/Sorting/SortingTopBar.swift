@@ -1,29 +1,50 @@
 import SwiftUI
 
-/// The sorting screen's top bar: "‹ Albums", the album with its progress in the center, and Undo
-/// and Review on the right. Narrow windows trade labels for icons.
+/// The sorting screen's top bar: "‹ Albums", the album with its progress in the center between
+/// the Previous and Next chevrons, and Undo and Review on the right. Narrow windows trade labels
+/// for icons.
 struct SortingTopBar: View {
     /// The bar's width (the window's).
     let width: CGFloat
     let title: String
     let state: SortingState
     let canUndo: Bool
-    /// Whether ⌘Z is live (only while sorting is the top screen).
+    /// Whether Previous and Next sit by the counter (see `SortingBarFit.holdsStepButtons`).
+    let showsStepButtons: Bool
+    let canGoBack: Bool
+    let canGoForward: Bool
+    /// Whether ⌘Z, ⌘[ and ⌘] are live (only while sorting is the top screen).
     let acceptsShortcuts: Bool
     let onBack: () -> Void
     let onUndo: () -> Void
     let onReview: () -> Void
+    let onStep: (PhotoStep) -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// The window controls' width (iPadOS 26 windows), which `TopBar` keeps the back button clear of.
     @State private var windowControlsWidth: CGFloat = 0
 
     var body: some View {
-        let fit = SortingBarFit(width: width, textScale: textScale, leadingInset: Metrics.topBarLeadingInset(clearing: windowControlsWidth))
+        let fit = SortingBarFit(
+            width: width,
+            textScale: SortingBarFit.textScale(at: dynamicTypeSize),
+            leadingInset: Metrics.topBarLeadingInset(clearing: windowControlsWidth),
+            pagerWidth: showsStepButtons ? SortingBarFit.pagerWidth : 0
+        )
         TopBar {
             backButton(showsTitle: fit.showsBackTitle)
         } center: {
-            SortingProgressTitle(title: title, position: state.position, total: state.total, progress: state.progress, barWidth: fit.progressWidth)
+            HStack(spacing: SortingBarFit.pagerSpacing) {
+                if showsStepButtons {
+                    PhotoStepButton(step: .previous, acceptsShortcut: acceptsShortcuts) { onStep(.previous) }
+                        .disabled(!canGoBack)
+                }
+                SortingProgressTitle(title: title, position: state.position, total: state.total, progress: state.progress, barWidth: fit.progressWidth)
+                if showsStepButtons {
+                    PhotoStepButton(step: .next, acceptsShortcut: acceptsShortcuts) { onStep(.next) }
+                        .disabled(!canGoForward)
+                }
+            }
         } trailing: {
             HStack(spacing: SortingBarFit.trailingSpacing) {
                 UndoButton(showsTitle: fit.showsUndoTitle, acceptsShortcut: acceptsShortcuts, action: onUndo)
@@ -34,35 +55,58 @@ struct SortingTopBar: View {
         .onWindowControlsWidthChange { windowControlsWidth = $0 }
     }
 
-    /// How much body text is scaled at the current text size (1 at the default size). Read from
-    /// the environment, so it honors the app's Dynamic Type cap.
-    private var textScale: CGFloat {
-        let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(dynamicTypeSize))
-        // Scaled from 100 because the metrics round to whole points.
-        return UIFontMetrics(forTextStyle: .body).scaledValue(for: 100, compatibleWith: traits) / 100
-    }
-
     private func backButton(showsTitle: Bool) -> some View {
         BackButton(title: "Albums", showsTitle: showsTitle, action: onBack)
             .accessibilityIdentifier(A11yID.Sorting.back)
     }
 }
 
-/// Which labels fit in the top bar. `TopBar` centers the title, so the title gets twice the room
-/// the wider side leaves it; Undo's label goes first, then Review's, and the progress bar shortens
-/// before a label has to go. Widths are measured from the bundled fonts at the default text size
-/// and scale with Dynamic Type.
-private struct SortingBarFit {
+/// Which labels fit in the top bar. `TopBar` centers the title (with Previous and Next beside it,
+/// when they are in the bar), so it gets twice the room the wider side leaves it; Undo's label
+/// goes first, then Review's, and the progress bar shortens before a label has to go.
+/// Widths are measured from the bundled fonts at the default text size and scale with Dynamic
+/// Type.
+struct SortingBarFit {
     static let trailingSpacing: CGFloat = 8
+    /// Between each chevron and the title.
+    static let pagerSpacing: CGFloat = 10
+    /// What the two chevrons take from the center.
+    static let pagerWidth = 2 * (Metrics.minTouch + pagerSpacing)
+    /// The room the album title needs between the chevrons at the default text size: an album
+    /// name like "Iceland 2024" whole, with "38 of 400" and the progress bar under it. Scaled
+    /// with Dynamic Type. A 520pt window without window controls has exactly this much.
+    static let titleRoom: CGFloat = 156
+
+    /// Whether Previous and Next fit by the counter in a bar `width` wide: only when the title
+    /// keeps `titleRoom` (scaled) between them, the back button giving up "Albums" first. Narrower
+    /// bars (Split View at a third, a half in portrait, larger text) leave them a row of their
+    /// own under the photo (`PhotoStepRow`).
+    static func holdsStepButtons(width: CGFloat, textScale: CGFloat, leadingInset: CGFloat) -> Bool {
+        let fit = SortingBarFit(width: width, textScale: textScale, leadingInset: leadingInset, pagerWidth: pagerWidth)
+        return fit.centerRoom >= titleRoom * textScale
+    }
+
+    /// How much body text is scaled at `size` (1 at the default size). Read from the
+    /// environment's size, so it honors the app's Dynamic Type cap.
+    static func textScale(at size: DynamicTypeSize) -> CGFloat {
+        let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(size))
+        // Scaled from 100 because the metrics round to whole points.
+        return UIFontMetrics(forTextStyle: .body).scaledValue(for: 100, compatibleWith: traits) / 100
+    }
 
     let showsBackTitle: Bool
     let showsUndoTitle: Bool
     let showsReviewTitle: Bool
     /// The progress bar: 260pt as designed, shorter in narrow windows.
     let progressWidth: CGFloat
+    /// The room left for the title (and the chevrons beside it, when they are in the bar).
+    let centerRoom: CGFloat
 
-    /// - Parameter leadingInset: Space the back button keeps clear of window controls.
-    init(width: CGFloat, textScale s: CGFloat, leadingInset: CGFloat) {
+    /// - Parameters:
+    ///   - leadingInset: Space the back button keeps clear of window controls.
+    ///   - pagerWidth: What Previous and Next take from the center (`pagerWidth`, or 0 when they
+    ///     are in a row of their own).
+    init(width: CGFloat, textScale s: CGFloat, leadingInset: CGFloat, pagerWidth: CGFloat) {
         let icon = Metrics.minTouch
         let backTitled = 37 + 54 * s
         let undoTitled = 45 + 38 * s
@@ -72,7 +116,7 @@ private struct SortingBarFit {
         // The centered title's room between a back button `back` wide and a right side
         // `trailing` wide.
         func room(back: CGFloat, trailing: CGFloat) -> CGFloat {
-            width - chrome - 2 * max(leadingInset + back, trailing)
+            width - chrome - 2 * max(leadingInset + back, trailing) - pagerWidth
         }
 
         // (Undo labeled, Review labeled, room the center needs to keep them)
@@ -87,11 +131,14 @@ private struct SortingBarFit {
                 break
             }
         }
-        // "‹ Albums" keeps its label when that costs the title nothing, or when there's room.
-        showsBackTitle = room(back: backTitled, trailing: trailing) >= min(120, room(back: icon, trailing: trailing))
+        // "‹ Albums" keeps its label when that costs the title nothing, or when there's room:
+        // beside the chevrons, room for the whole title.
+        let titleNeeds = pagerWidth > 0 ? Self.titleRoom * s : 120
+        showsBackTitle = room(back: backTitled, trailing: trailing) >= min(titleNeeds, room(back: icon, trailing: trailing))
         showsUndoTitle = choice.undo
         showsReviewTitle = choice.review
         let center = max(room(back: showsBackTitle ? backTitled : icon, trailing: trailing), 0)
+        centerRoom = center
         progressWidth = max(min(Metrics.progressWidth, center, max(90, width * 0.32)), 60)
     }
 }
@@ -117,6 +164,7 @@ private struct SortingProgressTitle: View {
                 .monospacedDigit()
                 .foregroundStyle(Palette.textMuted)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .accessibilityLabel("Photo \(position.formatted()) of \(total.formatted())")
                 .accessibilityValue("\(progress.formatted(.percent.precision(.fractionLength(0)))) sorted")
                 .accessibilityIdentifier(A11yID.Sorting.counter)

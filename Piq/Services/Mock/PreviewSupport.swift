@@ -12,6 +12,8 @@ enum PreviewSupport {
         case resume
         /// Sorting "Iceland 2026" at 38 of 400.
         case sorting
+        /// Sorting "Iceland 2026" from its first photo, nothing decided yet.
+        case sortingStart
         /// Review after sorting all 400 photos (1 in 8 marked).
         case review
         /// Review part-way through: 120 of 400 sorted.
@@ -76,6 +78,9 @@ enum PreviewSupport {
         case .sorting:
             app.preparePreviewSession(album: album, assetIDs: ids, sortedCount: 37, decide: decide)
             app.path = [.sorting(albumID: album.id)]
+        case .sortingStart:
+            app.preparePreviewSession(album: album, assetIDs: ids, sortedCount: 0, decide: decide)
+            app.path = [.sorting(albumID: album.id)]
         case .review:
             app.preparePreviewSession(album: album, assetIDs: ids, sortedCount: ids.count, decide: decide)
             app.path = [.review(albumID: album.id)]
@@ -96,6 +101,16 @@ enum PreviewSupport {
             fatalError("Scenario \(scenario) has no session")
         }
         return (app, session)
+    }
+
+    /// Steps `session` back with Previous to the nearest photo decided `action` (for previews of a
+    /// revisited photo and its tag).
+    static func stepBack(_ session: SessionController, toPhotoDecided action: SwipeAction) {
+        while session.step(.previous) {
+            if let id = session.state.currentAssetID, session.state.verdict(for: id)?.action == action {
+                return
+            }
+        }
     }
 
     static func inMemoryContainer() -> ModelContainer {

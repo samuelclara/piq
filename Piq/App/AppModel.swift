@@ -59,8 +59,8 @@ final class AppModel {
         albums.first { $0.id == selectedAlbumID }
     }
 
-    /// "Resume · 38 of 400" data for an album with an unfinished session. An opened session
-    /// answers from memory.
+    /// "Resume · 38 of 400" data for an album with an unfinished session: its first unsorted
+    /// photo, where opening it picks up. An opened session answers from memory.
     func resumePoint(for albumID: String) -> ResumePoint? {
         if let controller = controllers[albumID] {
             return controller.resumePoint
@@ -183,8 +183,8 @@ final class AppModel {
 
     // MARK: Sessions and navigation
 
-    /// Starts sorting `album`, or resumes where the last session left off. A finished session
-    /// with photos still in the trash opens on the review screen.
+    /// Starts sorting `album`, or resumes the last session at its first unsorted photo. A finished
+    /// session with photos still in the trash opens on the review screen.
     func openAlbum(_ album: AlbumSummary) async {
         guard !isOpeningAlbum, access.canRead else { return }
         isOpeningAlbum = true
@@ -228,7 +228,8 @@ final class AppModel {
     }
 
     /// The album's session, up to date with `ids`: created on first open, otherwise resumed
-    /// through its controller. One with nothing left to resume starts over.
+    /// through its controller at its first unsorted photo. One with nothing left to resume starts
+    /// over.
     private func prepareSession(for album: AlbumSummary, assetIDs ids: [String]) -> SessionController {
         let session: SessionController
         if let existing = controllers[album.id] ?? store.session(albumID: album.id).map(register) {
@@ -237,6 +238,7 @@ final class AppModel {
             if existing.resumePoint == nil {
                 existing.restart(with: ids)
             }
+            existing.goToFirstUnsorted()
             existing.markOpened()
             session = existing
         } else {
@@ -261,12 +263,14 @@ final class AppModel {
         path.append(.review(albumID: session.albumID))
     }
 
-    /// Leaves the review screen: back to sorting if photos are left, otherwise to the albums.
+    /// Leaves the review screen: back to sorting, at the first unsorted photo, if photos are left;
+    /// otherwise to the albums.
     func continueSorting() {
         guard let session = activeSession, !session.state.isComplete else {
             returnToAlbums()
             return
         }
+        session.goToFirstUnsorted()
         let sorting = Route.sorting(albumID: session.albumID)
         if path.count >= 2, path[path.count - 2] == sorting {
             path.removeLast()

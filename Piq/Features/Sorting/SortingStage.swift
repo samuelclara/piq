@@ -4,7 +4,7 @@ import SwiftUI
 /// The middle of the sorting screen: the current photo as large as it fits, the next one peeking
 /// out behind it, and any cards still flying off. VoiceOver, Full Keyboard Access and the keyboard
 /// see one element, the current photo at rest (see `photoElement`), with an action per
-/// `SwipeAction`; the cards themselves are hidden from them.
+/// `SwipeAction` and Previous and Next photo; the cards themselves are hidden from them.
 struct SortingStage: View {
     /// The keys of the swipe actions (← and →).
     private static let actionKeys = Set(SwipeAction.allCases.map(\.keyEquivalent))
@@ -20,6 +20,8 @@ struct SortingStage: View {
     let onKeyPress: (KeyPress) -> KeyPress.Result
     /// Runs a VoiceOver action: it commits without the flight.
     let onAccessibilityDecision: (SwipeAction) -> Void
+    /// Runs the VoiceOver actions Previous photo and Next photo.
+    var onAccessibilityStep: (PhotoStep) -> Void = { _ in }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -68,8 +70,8 @@ struct SortingStage: View {
             .accessibilityAddTraits(.isImage)
             .accessibilityIdentifier(A11yID.Sorting.photo)
             .accessibilityActions {
-                ForEach(SwipeAction.allCases, id: \.self) { action in
-                    Button(action.title) { decideForVoiceOver(action) }
+                ForEach(PhotoAccessibilityAction.available(canGoBack: deck.canGoBack, canGoForward: deck.canGoForward), id: \.self) { action in
+                    Button(action.name) { perform(action) }
                 }
             }
             .accessibilityHidden(!isShown)
@@ -93,11 +95,12 @@ struct SortingStage: View {
                 // It takes its own shape as it moves to the front.
                 cards.append(StackCard(id: behind, role: .behind, slot: deck.slot(for: behind), size: size))
             }
-            cards.append(StackCard(id: front, role: .front, slot: slot, size: size))
+            cards.append(StackCard(id: front, role: .front, slot: slot, size: size, verdict: deck.session.state.verdict(for: front)))
         }
         for departure in deck.departures.reversed() where !cards.contains(where: { $0.id == departure.id }) {
             let size = fittedSize(of: departure.slot, in: box)
-            cards.append(StackCard(id: departure.id, role: .departing(offset: departure.offset), slot: departure.slot, size: size))
+            let role = StackCard.Role.departing(offset: departure.offset, decides: departure.action != nil)
+            cards.append(StackCard(id: departure.id, role: role, slot: departure.slot, size: size))
         }
         return cards
     }
@@ -118,8 +121,9 @@ struct SortingStage: View {
         return 3.0 / 2.0
     }
 
-    /// A new card behind fades in; the photo coming back on Undo slides in from its side. Flying
-    /// cards are removed off screen, so they just go.
+    /// A new card behind fades in; the photo coming back on Undo slides in from its side, and the
+    /// one Previous brings back from the left, flat. Flying cards are removed off screen, so they
+    /// just go.
     private func transition(for card: StackCard) -> AnyTransition {
         let removal: AnyTransition
         switch card.role {
@@ -127,7 +131,7 @@ struct SortingStage: View {
         case .behind, .front: removal = .opacity
         }
         if !reduceMotion, let returning = deck.returning, returning.id == card.id {
-            return .asymmetric(insertion: .returning(from: returning.direction, distance: deck.flightDistance), removal: removal)
+            return .asymmetric(insertion: .returning(from: returning.direction, distance: deck.flightDistance, tilts: returning.tilts), removal: removal)
         }
         return .asymmetric(insertion: .opacity, removal: removal)
     }
@@ -145,28 +149,73 @@ struct SortingStage: View {
         return ""
     }
 
-    /// Runs a VoiceOver action, then reads out the photo that took its place. The focus stays on
-    /// the photo element, whose new label VoiceOver wouldn't read on its own; the announcement
-    /// waits for any already under way ("Marked for deletion").
-    private func decideForVoiceOver(_ action: SwipeAction) {
-        onAccessibilityDecision(action)
-        guard deck.session.state.currentAssetID != nil else { return }
-        var announcement = AttributedString(accessibilityLabel)
-        announcement[AttributeScopes.AccessibilityAttributes.AnnouncementPriorityAttribute.self] = .low
-        AccessibilityNotification.Announcement(announcement).post()
+    /// Runs a VoiceOver action, then reads out the photo now on screen. The focus stays on the
+    /// photo element, whose new label VoiceOver wouldn't read on its own; the announcement waits
+    /// for any already under way ("Marked for deletion"), and for the photo's details when it
+    /// has only just come into the window (see `currentPhotoLabel(in:)`).
+    private func perform(_ action: PhotoAccessibilityAction) {
+        switch action {
+        case .decide(let action): onAccessibilityDecision(action)
+        case .step(let step): onAccessibilityStep(step)
+        }
+        Task { [deck] in
+            guard let label = await Self.currentPhotoLabel(in: deck) else { return }
+            var announcement = AttributedString(label)
+            announcement[AttributeScopes.AccessibilityAttributes.AnnouncementPriorityAttribute.self] = .low
+            AccessibilityNotification.Announcement(announcement).post()
+        }
     }
 
-    /// "Photo 38 of 400, IMG_4838.HEIC, 14:32"
+    /// The label of the photo on screen, filename and time included: Previous lands on a photo
+    /// the loader had let go, whose details aren't in yet. Nil when no photo is on screen, or when
+    /// another photo has come up meanwhile (its own action announces it).
+    static func currentPhotoLabel(in deck: SwipeDeck) async -> String? {
+        guard let id = deck.session.state.currentAssetID else { return nil }
+        let metadata = await deck.metadata(for: id)
+        let state = deck.session.state
+        guard state.currentAssetID == id else { return nil }
+        return photoLabel(position: state.position, total: state.total, metadata: metadata, verdict: state.verdict(for: id))
+    }
+
     private var accessibilityLabel: String {
         let state = deck.session.state
         guard let id = state.currentAssetID else { return "" }
-        var parts = ["Photo \(state.position.formatted()) of \(state.total.formatted())"]
-        if let metadata = deck.slot(for: id)?.metadata {
+        return Self.photoLabel(position: state.position, total: state.total, metadata: deck.slot(for: id)?.metadata, verdict: state.verdict(for: id))
+    }
+
+    /// "Photo 38 of 400, IMG_4838.HEIC, 14:32", and for a photo already decided, its decision:
+    /// "…, marked for deletion" or "…, kept".
+    static func photoLabel(position: Int, total: Int, metadata: PhotoMetadata?, verdict: Verdict?) -> String {
+        var parts = ["Photo \(position.formatted()) of \(total.formatted())"]
+        if let metadata {
             parts.append(metadata.filename)
             if let date = metadata.creationDate {
                 parts.append(date.formatted(date: .omitted, time: .shortened))
             }
         }
+        if let verdict {
+            parts.append(verdict.tagTitle.lowercased())
+        }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// What VoiceOver can do with the photo: decide it, or move to the photo before or after it.
+enum PhotoAccessibilityAction: Hashable {
+    case decide(SwipeAction)
+    case step(PhotoStep)
+
+    var name: String {
+        switch self {
+        case .decide(let action): action.title
+        case .step(let step): step.title
+        }
+    }
+
+    /// Delete and Keep, then Previous photo and Next photo when there is a photo to go to.
+    static func available(canGoBack: Bool, canGoForward: Bool) -> [PhotoAccessibilityAction] {
+        SwipeAction.allCases.map(Self.decide)
+            + (canGoBack ? [.step(.previous)] : [])
+            + (canGoForward ? [.step(.next)] : [])
     }
 }

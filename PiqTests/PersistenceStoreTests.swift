@@ -150,8 +150,10 @@ final class PersistenceStoreTests: XCTestCase {
     /// A Recents session saved with full access (10 photos, 5 sorted, p1 and p3 in the trash),
     /// then a launch under limited access with p1 and p8 allowed: Recents lists those two only,
     /// which says nothing about the others. Every decision and the trash stay, only the queue
-    /// follows what Piq can see, and with full access again the session is exactly as it was.
-    /// (Earlier builds kept [p1, p8] with p1 sorted and in the trash: the rest was lost for good.)
+    /// follows what Piq can see, and with full access again every decision and the trash are as
+    /// they were, with the photo the session was on (p8) still current and the rest queued after
+    /// it. (Earlier builds kept [p1, p8] with p1 sorted and in the trash: the rest was lost for
+    /// good.)
     func testALaunchUnderLimitedAccessLosesNothingFromASmartAlbumSession() async throws {
         let all = (1...10).map { "p\($0)" }
         var sorted = SortingState(assetIDs: [])
@@ -176,7 +178,12 @@ final class PersistenceStoreTests: XCTestCase {
         }
 
         let app = try await launch(recentsLibrary(access: .authorized, photos: all))
-        XCTAssertEqual(try savedSessions(in: app.container).first?.state, sorted, "back to exactly where it was")
+        let saved = try XCTUnwrap(savedSessions(in: app.container).first?.state)
+        XCTAssertEqual(saved.history, sorted.history, "every decision as it was")
+        XCTAssertEqual(saved.decisions, sorted.decisions)
+        XCTAssertEqual(saved.markedIDs, sorted.markedIDs, "and the trash")
+        XCTAssertEqual(saved.assetIDs, ["p1", "p2", "p3", "p4", "p5", "p8", "p6", "p7", "p9", "p10"], "the photo the session is on stays put")
+        XCTAssertEqual(saved.currentAssetID, "p8")
         XCTAssertEqual(app.resumePoint(for: "recents"), ResumePoint(position: 6, total: 10, markedCount: 2, isComplete: false))
     }
 

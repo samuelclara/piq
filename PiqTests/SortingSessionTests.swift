@@ -72,6 +72,7 @@ final class SortingSessionTests: XCTestCase {
         let record = store.insert(assetIDs: Self.ids)
 
         record.decisions = Data("kEeD".utf8)
+        record.cursor = 4
 
         XCTAssertEqual(record.state.history.map(\.action), [.keep, .delete, .keep, .delete])
         XCTAssertEqual(record.state.markedInOrder, ["photo-2", "photo-4"])
@@ -119,36 +120,38 @@ final class SortingSessionTests: XCTestCase {
         XCTAssertEqual(record.photoCount, 7)
     }
 
-    /// How a session controller saves a decision or an undo: one letter more, or one fewer. The
-    /// record must end up exactly as writing the whole state would leave it.
+    /// How a session controller saves a decision or an undo: one letter set, one undo-log entry
+    /// added or taken off. The record must end up exactly as writing the whole state would leave
+    /// it.
     func testRecordingAndTakingBackDecisionsMatchesWritingTheState() throws {
         let store = RecordStore()
         let record = store.insert(assetIDs: Self.ids)
         var state = record.state
 
         for action in [SwipeAction.delete, .keep, .keep, .delete] {
-            let decision = try XCTUnwrap(state.apply(action))
-            record.recordDecision(action, at: state.sortedCount - 1, inTrash: state.isMarked(decision.assetID))
+            XCTAssertNotNil(recordDecision(action, in: &state, on: record))
             assertRecord(record, matches: state)
         }
+        XCTAssertEqual(record.undoLog?.count, UndoLog.entrySize, "sorted straight through: one run")
         for _ in 0..<2 {
-            state.undo()
-            record.keepDecisions(state.sortedCount)
+            XCTAssertNotNil(recordUndo(in: &state, on: record))
             assertRecord(record, matches: state)
         }
         XCTAssertEqual(record.state, state)
         XCTAssertEqual(String(decoding: record.decisions, as: UTF8.self), "Dk")
     }
 
-    /// A record holding more letters than photos (written by another build, or damaged) reads as
-    /// a finished session. The first change written to it leaves one letter per sorted photo,
-    /// so no stale letter is left to sort a photo queued later.
+    /// A record holding more letters than photos (written by an earlier build, or damaged) reads
+    /// as a finished session. The first change written to it leaves no letter past its photos, so
+    /// no stale letter is left to sort a photo queued later.
     func testEveryWriteLeavesOneLetterPerSortedPhoto() throws {
         let store = RecordStore()
         let ids = Array(Self.ids.prefix(4))
         func recordWithExtraLetters() -> SortingSession {
             let record = store.insert(albumID: UUID().uuidString, assetIDs: ids)
             record.decisions = Data("kDkkdd".utf8)
+            record.cursor = nil
+            record.undoLog = nil
             XCTAssertTrue(record.state.isComplete)
             return record
         }
@@ -156,12 +159,10 @@ final class SortingSessionTests: XCTestCase {
         // An undo.
         var record = recordWithExtraLetters()
         var state = record.state
-        state.undo()
-        record.keepDecisions(state.sortedCount)
+        XCTAssertNotNil(recordUndo(in: &state, on: record))
         assertRecord(record, matches: state)
         // A decision after it.
-        let decision = try XCTUnwrap(state.apply(.delete))
-        record.recordDecision(.delete, at: state.sortedCount - 1, inTrash: state.isMarked(decision.assetID))
+        XCTAssertNotNil(recordDecision(.delete, in: &state, on: record))
         assertRecord(record, matches: state)
 
         // A photo arriving in the album, which changes neither the decisions nor the trash.
@@ -185,8 +186,7 @@ final class SortingSessionTests: XCTestCase {
         var state = record.state
 
         for action in [SwipeAction.delete, .keep] {
-            let decision = try XCTUnwrap(state.apply(action))
-            record.recordDecision(action, at: state.sortedCount - 1, inTrash: state.isMarked(decision.assetID))
+            XCTAssertNotNil(recordDecision(action, in: &state, on: record))
             XCTAssertEqual(context.changedModelsArray.count, 1, "\(action)")
             XCTAssertTrue(context.changedModelsArray.first is SortingSession, "\(action): only the session record")
             try context.save()

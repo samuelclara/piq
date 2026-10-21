@@ -11,6 +11,9 @@ enum SortingLayout {
     /// Space under the photo: the next photo peeks out 18pt below it, then some air.
     static let stageBottomInset: CGFloat = 34
 
+    /// Space between `PhotoStepRow` (narrow windows) and the Delete and Keep pills under it.
+    static let stepRowSpacing: CGFloat = 12
+
     /// Width of each Delete / Keep pill in a window `width` wide.
     static func actionButtonWidth(forWidth width: CGFloat) -> CGFloat {
         let margin = Metrics.pageMargin(forWidth: width)

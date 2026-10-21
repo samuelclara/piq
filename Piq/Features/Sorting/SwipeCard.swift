@@ -7,8 +7,9 @@ struct StackCard: Identifiable {
         case behind
         /// The current photo, the only one that can be dragged.
         case front
-        /// Flying off the stage, headed for `offset`.
-        case departing(offset: CGSize)
+        /// Leaving the stage, headed for `offset`: flying off with a decision (tilted and tinted
+        /// like a swipe), or, when `decides` is false, sliding off flat because Next moved on.
+        case departing(offset: CGSize, decides: Bool)
     }
 
     /// The photo's asset ID: a card keeps its identity (and its view) from behind to front to
@@ -18,6 +19,8 @@ struct StackCard: Identifiable {
     let slot: PhotoSlot?
     /// The photo aspect-fit in the stage's box; the card behind takes the front card's size.
     let size: CGSize
+    /// The front card's decision, shown as a tag when the person comes back to a decided photo.
+    var verdict: Verdict?
 }
 
 /// A card in the stack: its pose (behind, in front, flying off), the drag that moves and tilts
@@ -35,9 +38,10 @@ struct SwipeCard: View {
     var body: some View {
         let offset = self.offset
         let isBehind = card.role == .behind
+        let swipes = self.swipes
         let shape = RoundedRectangle(cornerRadius: Metrics.photoCorner, style: .continuous)
-        PhotoCard(assetID: card.id, slot: card.slot, size: card.size, showsDetails: !isBehind)
-            .overlay { SwipeOverlay(translation: offset.width) }
+        PhotoCard(assetID: card.id, slot: card.slot, size: card.size, showsDetails: !isBehind, verdict: card.verdict)
+            .overlay { SwipeOverlay(translation: swipes ? offset.width : 0) }
             .clipShape(shape)
             .background {
                 shape
@@ -49,7 +53,7 @@ struct SwipeCard: View {
             .opacity(isBehind ? Metrics.stackOpacity : 1)
             // Moving up to the front (or back, on Undo) springs, whatever else is animating.
             .animation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.4, dampingFraction: 0.82), value: isBehind)
-            .modifier(CardFlightEffect(offset: offset, tilts: !reduceMotion))
+            .modifier(CardFlightEffect(offset: offset, tilts: swipes && !reduceMotion))
             .gesture(drag, including: card.role == .front ? .all : .none)
             .allowsHitTesting(card.role == .front)
             .sensoryFeedback(.impact(weight: .light), trigger: armedDirection(at: offset)) { _, armed in armed != nil }
@@ -69,9 +73,17 @@ struct SwipeCard: View {
             .zero
         case .front:
             deck.draggedID == card.id ? deck.dragTranslation : .zero
-        case .departing(let offset):
+        case .departing(let offset, _):
             offset
         }
+    }
+
+    /// Whether the card moves as a swipe does, tilted and tinted: not when Next slides it off.
+    private var swipes: Bool {
+        if case .departing(_, let decides) = card.role {
+            return decides
+        }
+        return true
     }
 
     /// The side a release would send the card to, once the drag is past the threshold.
@@ -102,11 +114,12 @@ struct CardFlightEffect: ViewModifier {
 }
 
 extension AnyTransition {
-    /// Undo: the photo slides back in from the side it left, tilted the way it went.
-    static func returning(from direction: SwipeAction.Direction, distance: CGFloat) -> AnyTransition {
+    /// Undo: the photo slides back in from the side it left, tilted the way it went. Previous:
+    /// the photo slides in flat (`tilts` false), as nothing is decided.
+    static func returning(from direction: SwipeAction.Direction, distance: CGFloat, tilts: Bool = true) -> AnyTransition {
         .modifier(
-            active: CardFlightEffect(offset: CGSize(width: direction.sign * distance, height: 0)),
-            identity: CardFlightEffect(offset: .zero)
+            active: CardFlightEffect(offset: CGSize(width: direction.sign * distance, height: 0), tilts: tilts),
+            identity: CardFlightEffect(offset: .zero, tilts: tilts)
         )
     }
 }

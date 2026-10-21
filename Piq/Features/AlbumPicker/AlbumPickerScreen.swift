@@ -2,10 +2,19 @@ import SwiftUI
 
 /// Screen 1: pick the album to sort. Handles every Photos authorization outcome: a quiet wait
 /// while the system asks, an explanation with a way to Settings when access is denied or
-/// restricted, and the album grid (with a way to change the selection under limited access).
+/// restricted, and the album grid (with a way to change the selection under limited access),
+/// which the person can search by name and sort by date created.
 struct AlbumPickerScreen: View {
     @Environment(AppModel.self) private var app
     @State private var isScrolled = false
+    /// What the album grid is filtered by; kept while Piq runs, not across launches.
+    @State private var searchText: String
+    @AppStorage(AlbumSortOrder.storageKey) private var sortOrder: AlbumSortOrder = .photos
+    @FocusState private var isSearchFocused: Bool
+
+    init(searchText: String = "") {
+        _searchText = State(initialValue: searchText)
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -18,16 +27,27 @@ struct AlbumPickerScreen: View {
         .background(Palette.ground.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden()
+        .onChange(of: app.path.isEmpty) { _, isOnTop in
+            // An album opened while typing: back on the picker, Return starts sorting again.
+            if !isOnTop { isSearchFocused = false }
+        }
     }
 
     @ViewBuilder
     private func page(_ layout: PickerLayout) -> some View {
         switch app.access {
         case .authorized, .limited:
-            AlbumGridPage(layout: layout, isScrolled: $isScrolled)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    PickerBottomBar(layout: layout)
-                }
+            AlbumGridPage(
+                layout: layout,
+                isScrolled: $isScrolled,
+                searchText: $searchText,
+                sortOrder: $sortOrder,
+                isSearchFocused: $isSearchFocused
+            )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                // Return in the search field ends the search; it doesn't start sorting.
+                PickerBottomBar(layout: layout, acceptsReturn: !isSearchFocused)
+            }
         case .notDetermined:
             PickerMessagePage(layout: layout) {
                 WaitingForAccessView()
@@ -51,10 +71,14 @@ private struct PickerHeader: View {
         HStack(spacing: 16) {
             Wordmark()
             Spacer(minLength: 0)
-            Text(isConnected ? "Connected to Photos" : "Not connected")
-                .font(.meta)
-                .foregroundStyle(Palette.textMuted)
-                .lineLimit(1)
+            if isConnected {
+                OpenPhotosButton()
+            } else {
+                Text("Not connected")
+                    .font(.meta)
+                    .foregroundStyle(Palette.textMuted)
+                    .lineLimit(1)
+            }
         }
         .padding(.trailing, margin)
         .leadingPaddingClearingWindowControls(margin)
@@ -68,10 +92,55 @@ private struct PickerHeader: View {
     }
 }
 
-/// "Which album are we sorting?" and the line explaining the swipes.
-struct PickerIntro: View {
+/// "Connected to Photos" with a small arrow: opens the Photos app. If iPadOS can't open it, a
+/// toast says so and Piq stays as it is.
+///
+/// VoiceOver reads "Connected to Photos, opens Photos": it starts with the words on screen, so
+/// Voice Control's "Tap Connected to Photos" works (as do "Open Photos" and "Photos"), keeps the
+/// connection status, and says that it leaves Piq even with hints turned off.
+struct OpenPhotosButton: View {
+    /// The URL scheme the Photos app answers to (not documented, but long-standing; checked on
+    /// iPadOS 26.5). Opening it needs no `LSApplicationQueriesSchemes` entry; only `canOpenURL`
+    /// would, and Piq doesn't ask: the open call itself says whether it worked.
+    static let photosURL = URL(string: "photos-redirect://")
+
+    @Environment(AppModel.self) private var app
+    @Environment(\.openURL) private var openURL
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        Button(action: openPhotos) {
+            HStack(spacing: 5) {
+                Text("Connected to Photos")
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .accessibilityHidden(true)
+            }
+        }
+        .buttonStyle(.quietLink)
+        .contentShape(.hoverEffect, Capsule().inset(by: -8))
+        .hoverEffect(.highlight)
+        .accessibilityLabel("Connected to Photos, opens Photos")
+        .accessibilityInputLabels(["Connected to Photos", "Open Photos", "Photos"])
+        .accessibilityIdentifier(A11yID.Picker.openPhotos)
+    }
+
+    private func openPhotos() {
+        guard let url = Self.photosURL else { return }
+        openURL(url) { opened in
+            if !opened {
+                app.toasts.show("Photos couldn't be opened", systemImage: "exclamationmark.circle")
+            }
+        }
+    }
+}
+
+/// "Which album are we sorting?" and the line explaining the swipes; on the album page, the
+/// search and sort tools beside or under them (see `PickerIntroLayout`).
+struct PickerIntro<Tools: View>: View {
+    @ViewBuilder let tools: Tools
+
+    var body: some View {
+        PickerIntroLayout {
             Text("Which album are we sorting?")
                 .font(.screenTitle)
                 .foregroundStyle(Palette.text)
@@ -79,9 +148,15 @@ struct PickerIntro: View {
             Text("Piq shows each photo full screen. Swipe left to mark it for deletion, swipe right to keep it.")
                 .font(.lead)
                 .foregroundStyle(Palette.textMuted)
+            tools
         }
-        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension PickerIntro where Tools == EmptyView {
+    init() {
+        tools = EmptyView()
     }
 }
 
@@ -140,5 +215,47 @@ struct PickerIntro: View {
     AlbumPickerScreen()
         .environment(PreviewSupport.appModel(.resume))
         .dynamicTypeSize(.xxLarge)
+}
+
+#Preview("Search", traits: .landscapeLeft) {
+    AlbumPickerScreen(searchText: "is")
+        .environment(PreviewSupport.appModel(.resume))
+}
+
+#Preview("Search hides the selection", traits: .portrait) {
+    AlbumPickerScreen(searchText: "lisbon")
+        .environment(PreviewSupport.appModel(.resume))
+}
+
+#Preview("Search, no matches", traits: .landscapeLeft) {
+    AlbumPickerScreen(searchText: "Kyoto")
+        .environment(PreviewSupport.appModel(.resume))
+}
+
+#Preview("Search, narrow", traits: .fixedLayout(width: 375, height: 834)) {
+    AlbumPickerScreen(searchText: "a")
+        .environment(PreviewSupport.appModel(.resume))
+}
+
+#Preview("Sorted by date created", traits: .landscapeLeft) {
+    AlbumPickerScreen()
+        .environment(PreviewSupport.appModel(.resume))
+        .defaultAppStorage(PickerPreviewDefaults.sortedByDate)
+}
+
+#Preview("Sorted by date created, largest text", traits: .fixedLayout(width: 834, height: 1194)) {
+    AlbumPickerScreen()
+        .environment(PreviewSupport.appModel(.resume))
+        .defaultAppStorage(PickerPreviewDefaults.sortedByDate)
+        .dynamicTypeSize(.xxLarge)
+}
+
+/// User defaults for previews that start sorted by date created.
+private enum PickerPreviewDefaults {
+    static var sortedByDate: UserDefaults {
+        let defaults = UserDefaults(suiteName: "PiqPreview.sortedByDate") ?? .standard
+        defaults.set(AlbumSortOrder.dateCreated.rawValue, forKey: AlbumSortOrder.storageKey)
+        return defaults
+    }
 }
 #endif

@@ -75,25 +75,56 @@ extension SessionController {
 }
 
 /// Asserts that `record`'s stored fields describe exactly `state`: the photo list and its count,
-/// and one letter per sorted photo for its decision, in upper case while it is in the trash.
+/// one byte per photo up to the last decided one (its decision's letter, in upper case while it is
+/// in the trash, or "." while unsorted), the cursor, and the undo log as encoding the whole state
+/// would write it (so the hot paths' entry-by-entry changes add up to the same bytes).
 @MainActor
 func assertRecord(_ record: SortingSession, matches state: SortingState, file: StaticString = #filePath, line: UInt = #line) {
     XCTAssertEqual(record.photos?.assetIDs, state.assetIDs, "photos", file: file, line: line)
     XCTAssertEqual(record.photoCount, state.total, "photoCount", file: file, line: line)
     XCTAssertEqual(String(decoding: record.decisions, as: UTF8.self), decisionLetters(state), "decisions", file: file, line: line)
+    XCTAssertEqual(record.cursor, state.currentIndex, "cursor", file: file, line: line)
+    XCTAssertEqual(record.undoLog, SortingSession.encode(state).undoLog, "undo log", file: file, line: line)
+    XCTAssertEqual(record.state.history, state.history, "undo history", file: file, line: line)
     XCTAssertFalse(record.isInEarlierLayout, "nothing left in the earlier layout", file: file, line: line)
 }
 
-/// What `SortingSession.decisions` holds for `state`, spelled out: "kDkd" is a keep, a photo in
-/// the trash, a keep and a photo marked for deletion and then restored.
+/// What `SortingSession.decisions` holds for `state`, spelled out: "kD.d" is a keep, a photo in
+/// the trash, a photo skipped and a photo marked for deletion and then restored.
 func decisionLetters(_ state: SortingState) -> String {
-    state.history.map { decision in
-        let letter = switch decision.action {
+    var letters = state.assetIDs.map { id -> String in
+        guard let verdict = state.verdict(for: id) else { return "." }
+        let letter = switch verdict.action {
         case .delete: "d"
         case .keep: "k"
         }
-        return state.isMarked(decision.assetID) ? letter.uppercased() : letter
-    }.joined()
+        return verdict.isMarked ? letter.uppercased() : letter
+    }
+    while letters.last == "." {
+        letters.removeLast()
+    }
+    return letters.joined()
+}
+
+/// Applies `action` to `state` and records it on `record` the way `SessionController.decide`
+/// does.
+@MainActor
+@discardableResult
+func recordDecision(_ action: SwipeAction, in state: inout SortingState, on record: SortingSession) -> SortDecision? {
+    let position = state.currentIndex
+    guard let decision = state.apply(action) else { return nil }
+    record.recordDecision(decision, at: position, inTrash: state.isMarked(decision.assetID), cursor: state.currentIndex)
+    return decision
+}
+
+/// Undoes the last decision of `state` and records it on `record` the way
+/// `SessionController.undo` does.
+@MainActor
+@discardableResult
+func recordUndo(in state: inout SortingState, on record: SortingSession) -> SortDecision? {
+    guard let decision = state.undo() else { return nil }
+    record.recordUndo(of: decision, at: state.currentIndex, cursor: state.currentIndex)
+    return decision
 }
 
 /// A session as the store has it on disk (or in memory), detached from any context.

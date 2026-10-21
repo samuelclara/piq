@@ -1,14 +1,17 @@
 import SwiftUI
 
 /// What a card shows: a blurred preview until the sharp image arrives, then a crossfade to it.
-/// The card in front also shows the filename chip, and a spinner (with iCloud progress) when the
-/// sharp image is slow to come.
+/// The card in front also shows the filename chip, the photo's decision when it has one (the
+/// person came back to it), and a spinner (with iCloud progress) when the sharp image is slow to
+/// come.
 struct PhotoCard: View {
     let assetID: String
     let slot: PhotoSlot?
     let size: CGSize
     /// The chip and the loading state; the card behind the current one shows the photo alone.
     let showsDetails: Bool
+    /// The photo's decision, shown as a tag next to the chip; nil while it is unsorted.
+    var verdict: Verdict?
 
     /// Set once the card has been up a moment without its sharp image: the sharp image then fades
     /// in over what was seen (the preview or the placeholder). One that comes sooner (from the
@@ -44,7 +47,7 @@ struct PhotoCard: View {
         .clipped()
         .animation(hasWaited ? .easeOut(duration: 0.2) : nil, value: isSharp)
         .animation(.easeOut(duration: 0.15), value: slot?.preview != nil)
-        .overlay(alignment: .topLeading) { chip }
+        .overlay(alignment: .top) { topRow }
         .overlay(alignment: .bottomLeading) { failureChip }
         .overlay { loadingIndicator }
         .task(id: assetID) {
@@ -78,15 +81,39 @@ struct PhotoCard: View {
 
     private var chipInset: CGFloat { 14 }
 
-    /// On the card in front only, so the card behind holds no hidden text; it fades in as the
-    /// card moves up.
+    /// The filename chip on the left and the decision tag on the right. On the card in front
+    /// only, so the card behind holds no hidden text; they fade in as the card moves up. When the
+    /// photo is too narrow for both whole (a third-width window, larger text), the tag drops its
+    /// words for its icon, so the filename keeps its content; the photo's VoiceOver label says
+    /// the decision either way.
     @ViewBuilder
-    private var chip: some View {
-        if showsDetails, let text = slot?.metadata?.chipText {
-            PhotoChip(text: text)
-                .frame(maxWidth: max(size.width - 2 * chipInset, 0), alignment: .leading)
-                .padding(chipInset)
-                .transition(.opacity)
+    private var topRow: some View {
+        if showsDetails {
+            ViewThatFits(in: .horizontal) {
+                topRowContent(isCompact: false)
+                topRowContent(isCompact: true)
+            }
+            .frame(width: max(size.width - 2 * chipInset, 0), alignment: .leading)
+            .padding(chipInset)
+            .animation(.easeOut(duration: 0.15), value: verdict)
+        }
+    }
+
+    /// The chip and the tag side by side: both whole (`ViewThatFits` takes it only if it fits),
+    /// or the tag as an icon and the chip shortened if even that is too wide.
+    private func topRowContent(isCompact: Bool) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            if let text = slot?.metadata?.chipText {
+                PhotoChip(text: text)
+                    .fixedSize(horizontal: !isCompact, vertical: false)
+                    .transition(.opacity)
+            }
+            Spacer(minLength: 0)
+            if let verdict {
+                DecisionTag(verdict: verdict, isCompact: isCompact)
+                    .layoutPriority(1)
+                    .transition(.opacity)
+            }
         }
     }
 

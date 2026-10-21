@@ -29,6 +29,34 @@ struct AlbumSummary: Identifiable, Hashable, Sendable {
     let photoCount: Int
     /// The newest photo in the album, used as its cover.
     let coverAssetID: String?
+    /// Where the album comes in the order the person's albums were made, higher being newer:
+    /// what the picker's "Date created" order sorts by. PhotoKit gives no creation date for an
+    /// album (no public property; `creationDate` is an unsupported sort key and predicate for
+    /// collections), but it lists albums in the order they were made when asked for no
+    /// particular order (see `PhotoKitQueries.albumListing()`). Nil for Recents and Favorites,
+    /// and for albums made elsewhere in the code without one.
+    let creationRank: Int?
+    /// When the cover photo was taken; nil for an album without photos. "Date created" falls
+    /// back to it for an album without a `creationRank`.
+    let newestPhotoDate: Date?
+
+    init(
+        id: String,
+        title: String,
+        kind: Kind,
+        photoCount: Int,
+        coverAssetID: String?,
+        creationRank: Int? = nil,
+        newestPhotoDate: Date? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.kind = kind
+        self.photoCount = photoCount
+        self.coverAssetID = coverAssetID
+        self.creationRank = creationRank
+        self.newestPhotoDate = newestPhotoDate
+    }
 }
 
 /// What Piq shows about one photo.

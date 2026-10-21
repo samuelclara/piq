@@ -106,15 +106,18 @@ Tools/            scripts that prepare simulators for the gated real-library tes
 ```
 
 - **Sessions.** Each album has one `SortingSession` in SwiftData: the album's identifier, its
-  photos' identifiers (oldest first), the current index, the marked photos and the undo history.
-  Every decision is saved the moment it lands, so you can quit (or be killed) at any point and
+  photos' identifiers (oldest first), a cursor (the photo on screen), a decision per photo
+  (Delete, Keep, or unsorted), the marked photos and an undo log of decisions in the order they
+  were made (a decision that replaced another remembers it). Moving with Previous and Next saves
+  only the cursor and isn't undoable. Every decision is saved the moment it lands, so you can quit (or be killed) at any point and
   resume. The photo list lives in a record of its own (`SessionPhotos`), so a decision only
   writes the small session row: under a millisecond per swipe even for a 50,000-photo Recents.
   On launch the picker selects the album you sorted last.
 - **Library changes.** Piq watches the library (`PHPhotoLibraryChangeObserver`, debounced
   300 ms, and only for changes that add, remove or reorder photos or rename albums). Photos
   deleted elsewhere drop out of sessions and the trash; photos added to an album since you
-  started are queued in the unsorted part, so resuming also sorts what's new. If the album
+  started are queued unsorted in album order after the photo on screen (which stays), so
+  resuming also sorts what's new. If the album
   itself is deleted while you're in it, Piq says so and goes back to the albums.
 - **Images.** The sorting screen keeps exactly the current photo and the next three loaded
   (`PHCachingImageManager`, high-quality format, iCloud downloads allowed), plus the last photo
@@ -142,11 +145,11 @@ The default suites run against the mock library and need nothing but a booted iP
 DEST='platform=iOS Simulator,name=iPad Pro 11-inch (M5)'
 
 # Unit tests: session engine, persistence and migration, app model, races, library and access
-# changes, image loading policy, layouts (270 tests; 35 are gated or opt-in and skip by default)
+# changes, image loading policy, layouts (316 tests; 38 are gated or opt-in and skip by default)
 xcodebuild test -project Piq.xcodeproj -scheme Piq -destination "$DEST" -only-testing:PiqTests
 
 # UI tests on the mock library: every screen and state, quit and resume, keyboard,
-# accessibility audits, narrow windows (72 tests; 15 gated)
+# accessibility audits, narrow windows (94 tests; 15 gated)
 xcodebuild test -project Piq.xcodeproj -scheme Piq -destination "$DEST" -only-testing:PiqUITests
 
 # Screenshots of every screen and state, in landscape and portrait
@@ -160,7 +163,7 @@ the tests):
 
 | Variable | Tests | Needs |
 | --- | --- | --- |
-| `TEST_RUNNER_PIQ_E2E=1` | `PhotoKitIntegrationTests`, `PhotoKitEndToEndTests` | A simulator prepared by `Tools/PhotoKitE2E/run-e2e.sh`, which does everything (media, import, granting access through the real prompt, albums) and runs them: `SIM=<udid> DD=<scratch dir> Tools/PhotoKitE2E/run-e2e.sh all` |
+| `TEST_RUNNER_PIQ_E2E=1` | `PhotoKitIntegrationTests`, `PhotoKitEndToEndTests`, `PickerRealLibraryTests` | A simulator prepared by `Tools/PhotoKitE2E/run-e2e.sh`, which does everything (media, import, granting access through the real prompt, albums) and runs them: `SIM=<udid> DD=<scratch dir> Tools/PhotoKitE2E/run-e2e.sh all` |
 | `TEST_RUNNER_PIQ_E2E=1` | `PerformanceRealLibraryTests`, `PerformanceSortingTests` | A simulator with 400+ full-size photos: `Tools/Performance/prepare-library.sh <udid> . <scratch dir> all`, and `… reset` before each run. Run `PerformanceSortingTests` first on a fresh simulator (it answers the Photos prompt). |
 | `TEST_RUNNER_PIQ_SNAPSHOTS=1` | `ReviewLayoutSnapshotTests`, `ExperiencePreviewSnapshots` | Nothing; they attach renderings of each state to look at |
 | `TEST_RUNNER_PIQ_A11Y_SETTINGS=1` | `ExperienceAccessibilitySettingsTests` | Nothing; turns Bold Text, Increase Contrast and Reduce Motion on in Settings, then off again |
@@ -187,9 +190,21 @@ Every screen also has SwiftUI previews that render from the mock photos in
 - **Times on the chip** follow the device's locale (14:32, or 2:32 PM).
 - **Text size** grows with Dynamic Type up to the xxLarge size; the layouts are checked there,
   in portrait, landscape and narrow Split View windows.
-- **Keyboard:** ← and → decide (holding a key decides once), ⌘Z undoes, Return starts sorting
-  on the picker, ⌘A selects all in Review, and Escape (or ⌘.) closes the confirmation and the
-  preview.
+- **Previous and Next** move between photos without deciding. A photo you skip stays unsorted:
+  past the last photo Piq says how many are left, and Resume starts at the first unsorted one.
+  Going back to a decided photo shows its decision; Delete or Keep replaces it.
+- **"Connected to Photos"** on the picker opens the Photos app.
+- **Keyboard:** ← and → decide (holding a key decides once), ⌘[ and ⌘] go to the previous and
+  next photo without deciding, ⌘Z undoes, Return starts sorting
+  on the picker, ⌘F searches the albums (Return in the search field only ends the search;
+  Escape or ⌘. clears it), ⌘A selects all in Review, and Escape (or ⌘.) closes the
+  confirmation and the preview.
+- **"Date created"** on the picker lists the album made last first. PhotoKit has no public
+  creation date for albums; it does list regular albums in the order they were made when asked
+  for no particular order. Apple doesn't document that, so `PickerRealLibraryTests` checks it
+  (titles, photos, renames and folder order don't change it). Recents and Favorites stay first
+  in every order. Not checked: albums that arrive through iCloud Photos (the simulator has none)
+  probably count from when they reached the device.
 
 ## Fonts
 

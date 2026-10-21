@@ -274,8 +274,9 @@ final class PhotoKitIntegrationTests: XCTestCase {
         let record = try XCTUnwrap(app.store.session(albumID: trip.id))
         assertRecord(record, matches: session.state)
 
-        // Back in the album: queued again in capture order, unsorted and not in the trash. It is
-        // older than every unsorted photo, so it is next.
+        // Back in the album: queued again in capture order, unsorted and not in the trash. The
+        // photo on screen stays; the returning one is older than every unsorted photo, so it is
+        // next.
         calls.reset()
         try await PhotoKitTestLibrary.setMembership(of: leaving, in: layout.trip.localIdentifier, isMember: true)
 
@@ -285,8 +286,9 @@ final class PhotoKitIntegrationTests: XCTestCase {
         XCTAssertEqual(session.state.total, 25)
         XCTAssertEqual(session.state.sortedCount, 3)
         XCTAssertFalse(session.state.isMarked(leaving))
-        XCTAssertEqual(session.state.currentAssetID, leaving)
-        XCTAssertEqual(Array(session.state.assetIDs.dropFirst(3)), [leaving] + ids.dropFirst(4))
+        XCTAssertEqual(session.state.currentAssetID, ids[4], "the photo on screen stays")
+        XCTAssertEqual(session.state.upcomingAssetIDs(1), [leaving])
+        XCTAssertEqual(Array(session.state.assetIDs.dropFirst(3)), [ids[4], leaving] + ids.dropFirst(5))
         XCTAssertEqual(app.albums.first { $0.id == trip.id }?.photoCount, 25)
     }
 

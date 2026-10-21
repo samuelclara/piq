@@ -102,7 +102,7 @@ final class AlbumPickerScreenshotExtras: XCTestCase {
 
         app = launch(access: "limited", orientation: .portrait)
         XCTAssertTrue(app.buttons["picker.changeSelection"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Connected to Photos"].exists)
+        XCTAssertEqual(app.buttons["picker.openPhotos"].label, "Connected to Photos, opens Photos")
         attach("picker-limited")
         app.terminate()
     }

@@ -274,6 +274,18 @@ enum PhotoKitQueries {
     /// limited access, Recents and Favorites only: PhotoKit still lists every album then, but
     /// holding just the photos the person allowed (none, for most), and a saved session must not
     /// be measured against that partial view of its album.
+    ///
+    /// Each of the person's albums gets its `creationRank` (for the picker's "Date created"):
+    /// its place in PhotoKit's list of regular albums fetched with no sort descriptor, which
+    /// comes in the order the albums were made, oldest first. Apple doesn't document that
+    /// order, but it is the only public trace of when an album was made that we found:
+    /// `PHAssetCollection` has no creation date, `creationDate` as a collection sort key or
+    /// predicate raises "Unsupported sort descriptor/predicate in fetch options", and
+    /// `startDate`/`endDate` are the capture range of the album's photos, which Photos fills in
+    /// later (nil for an album made a moment ago). Checked on iPadOS 26.5 by `PickerRealLibraryTests`: the order follows
+    /// when albums were made, not their titles, their photos, renames, or their place in a
+    /// folder. Not checked (the simulator has no iCloud Photos): an album that arrives through
+    /// iCloud Photos probably counts from when it reached this device.
     static func albumListing() -> AlbumListing {
         var listing = AlbumListing()
         // PhotoKit titles these in the app's language, the way Photos does; the fallbacks are
@@ -288,15 +300,16 @@ enum PhotoKitQueries {
             }
         }
         guard PHPhotoLibrary.authorizationStatus(for: .readWrite) != .limited else { return listing }
-        for collection in userAlbums(into: &listing.snapshot) {
-            listing.add(collection, kind: .user, title: collection.localizedTitle ?? "Untitled album")
+        for (collection, creationRank) in userAlbums(into: &listing.snapshot) {
+            listing.add(collection, kind: .user, title: collection.localizedTitle ?? "Untitled album", creationRank: creationRank)
         }
         return listing
     }
 
     /// The person's own albums in Photos' order, an album inside a folder taking the folder's
-    /// place. Shared, synced and imported albums are left out: Piq can't delete their photos.
-    private static func userAlbums(into snapshot: inout LibraryWatch.Snapshot) -> [PHAssetCollection] {
+    /// place, each with its place in the order the albums were made (see `albumListing()`).
+    /// Shared, synced and imported albums are left out: Piq can't delete their photos.
+    private static func userAlbums(into snapshot: inout LibraryWatch.Snapshot) -> [(PHAssetCollection, creationRank: Int?)] {
         var albums: [PHAssetCollection] = []
         var listed = Set<String>()
         var folders: [PHFetchResult<PHCollection>] = []
@@ -319,15 +332,18 @@ enum PhotoKitQueries {
         }
         walk(PHCollectionList.fetchTopLevelUserCollections(with: nil))
         // An album PhotoKit lists outside the folder tree still shows, after the others.
+        // With no sort descriptor, in the order the albums were made.
         let regular = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil)
-        regular.enumerateObjects { album, _, _ in
+        var creationRanks: [String: Int] = [:]
+        regular.enumerateObjects { album, index, _ in
             titles[album.localIdentifier] = album.localizedTitle ?? ""
+            creationRanks[album.localIdentifier] = index
             add(album)
         }
         snapshot.folders = folders
         snapshot.albums = regular
         snapshot.titles = titles
-        return albums
+        return albums.map { ($0, creationRanks[$0.localIdentifier]) }
     }
 
     static func assetIDs(inAlbum albumID: String) -> [String]? {
@@ -376,10 +392,20 @@ enum PhotoKitQueries {
 }
 
 private extension PhotoKitQueries.AlbumListing {
-    /// Lists `collection`: its photos newest first give the count and the cover (the newest).
-    mutating func add(_ collection: PHAssetCollection, kind: AlbumSummary.Kind, title: String) {
+    /// Lists `collection`: its photos newest first give the count, the cover (the newest) and
+    /// the cover's capture date.
+    mutating func add(_ collection: PHAssetCollection, kind: AlbumSummary.Kind, title: String, creationRank: Int? = nil) {
         let photos = PHAsset.fetchAssets(in: collection, options: PhotoKitQueries.photoOptions(oldestFirst: false))
-        albums.append(AlbumSummary(id: collection.localIdentifier, title: title, kind: kind, photoCount: photos.count, coverAssetID: photos.firstObject?.localIdentifier))
+        let newest = photos.firstObject
+        albums.append(AlbumSummary(
+            id: collection.localIdentifier,
+            title: title,
+            kind: kind,
+            photoCount: photos.count,
+            coverAssetID: newest?.localIdentifier,
+            creationRank: creationRank,
+            newestPhotoDate: newest?.creationDate
+        ))
         snapshot.photos.append(photos)
     }
 }

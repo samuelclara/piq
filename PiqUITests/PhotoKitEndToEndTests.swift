@@ -59,6 +59,7 @@ final class PhotoKitEndToEndTests: XCTestCase {
         static let photo = "sorting.photo"
         static let delete = "sorting.delete"
         static let keep = "sorting.keep"
+        static let next = "sorting.next"
         static let reviewBack = "review.back"
         static let summary = "review.summary"
         static let emptyTrash = "review.emptyTrash"
@@ -382,10 +383,13 @@ final class PhotoKitEndToEndTests: XCTestCase {
         app.buttons[ID.reviewBack].tap()
         expect(app, position: 2, total: total - 2, marked: 0)
 
-        // Back in the album: both are queued again in capture order. The marked one is older
-        // than the photo on screen, so it is next.
+        // Back in the album: both are queued again in capture order. The photo on screen stays;
+        // the marked one is older than it, so it is next.
         try await Self.setMembership(of: [marked.id, unsorted.id], in: albumID, isMember: true)
         expect(app, position: 2, total: total, marked: 0)
+        XCTAssertEqual(try currentPhoto(app).filename, onScreen.filename, "the photo on screen stays")
+        app.buttons[ID.next].tap()
+        expect(app, position: 3, total: total, marked: 0)
         XCTAssertEqual(try currentPhoto(app).filename, marked.filename)
     }
 

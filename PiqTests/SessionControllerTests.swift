@@ -174,7 +174,7 @@ final class SessionControllerTests: XCTestCase {
         try await expectTouched(true, "opening the album")
     }
 
-    /// A record holding more decisions than photos (written by another build, or damaged) opens
+    /// A record holding more decisions than photos (written by an earlier build, or damaged) opens
     /// as a finished session. From its first change on, what is saved is what the session shows:
     /// an undo, a decision and a photo queued later all line up with the photo list.
     func testASessionWithMoreDecisionsThanPhotosIsSavedExactlyFromItsFirstChange() throws {
@@ -182,6 +182,8 @@ final class SessionControllerTests: XCTestCase {
         let store = SessionStore(context: container.mainContext)
         let record = store.insertSession(albumID: "album", title: "Album", assetIDs: ["p1", "p2", "p3", "p4"])
         record.decisions = Data("kDkkdd".utf8)
+        record.cursor = nil
+        record.undoLog = nil
         store.save()
         let session = SessionController(record: record, store: store, library: StubPhotoLibrary())
         XCTAssertTrue(session.state.isComplete)

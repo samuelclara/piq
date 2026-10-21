@@ -17,6 +17,8 @@ final class MockPhotoLibrary: PhotoLibraryClient {
         let title: String
         let kind: AlbumSummary.Kind
         var assetIDs: [String]
+        /// Where it comes in the order the albums were made (`AlbumSummary.creationRank`).
+        var creationRank: Int?
     }
 
     static let icelandAlbumID = "mock-album-iceland"
@@ -77,7 +79,15 @@ final class MockPhotoLibrary: PhotoLibraryClient {
     func albumSummaries() -> [AlbumSummary] {
         guard access.canRead else { return [] }
         return albums.map { album in
-            AlbumSummary(id: album.id, title: album.title, kind: album.kind, photoCount: album.assetIDs.count, coverAssetID: album.assetIDs.last)
+            AlbumSummary(
+                id: album.id,
+                title: album.title,
+                kind: album.kind,
+                photoCount: album.assetIDs.count,
+                coverAssetID: album.assetIDs.last,
+                creationRank: album.creationRank,
+                newestPhotoDate: album.assetIDs.last.flatMap { assets[$0]?.metadata.creationDate }
+            )
         }
     }
 
@@ -175,18 +185,22 @@ final class MockPhotoLibrary: PhotoLibraryClient {
         nextSerial = 0
         guard access.canRead else { return }
 
-        // A 400-photo import, two smaller albums and an empty one.
-        let groups: [(id: String, title: String, count: Int)] = [
-            (Self.icelandAlbumID, "Iceland 2026", 400),
-            (Self.lisbonAlbumID, "Weekend in Lisbon", 36),
-            ("mock-album-family", "Family", 18),
-            ("mock-album-drafts", "Drafts", 0),
+        // A 400-photo import, two smaller albums and an empty one, in Photos' order. Photos are
+        // numbered in capture order, so Family holds the newest photos and Iceland the oldest.
+        // The albums were made Family, Iceland 2026, Weekend in Lisbon, then Drafts, so "Date
+        // created" lists Drafts, Weekend in Lisbon, Iceland 2026, Family: neither Photos' order
+        // nor the order of their photos.
+        let groups: [(id: String, title: String, count: Int, creationRank: Int)] = [
+            (Self.icelandAlbumID, "Iceland 2026", 400, 1),
+            (Self.lisbonAlbumID, "Weekend in Lisbon", 36, 2),
+            ("mock-album-family", "Family", 18, 0),
+            ("mock-album-drafts", "Drafts", 0, 3),
         ]
         var userAlbums: [Album] = []
         var everything: [String] = []
         for group in groups {
             let ids = (0..<group.count).map { _ in makeAsset() }
-            userAlbums.append(Album(id: group.id, title: group.title, kind: .user, assetIDs: ids))
+            userAlbums.append(Album(id: group.id, title: group.title, kind: .user, assetIDs: ids, creationRank: group.creationRank))
             everything += ids
         }
 
