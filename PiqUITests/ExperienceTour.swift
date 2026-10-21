@@ -326,7 +326,7 @@ final class ExperienceTour: ExperienceTestCase {
         XCTAssertTrue(confirm.waitForExistence(timeout: 3))
         XCTAssertEqual(confirm.label, "Delete 3 photos")
         XCTAssertTrue(labelled("Delete 3 photos?", in: app).exists)
-        XCTAssertTrue(labelled("They move to Recently Deleted in Photos, where you can still recover them for 30 days. iPadOS will ask you to confirm once more.", in: app).exists)
+        XCTAssertTrue(labelled("They move to Recently Deleted in Photos, where you can still recover them for 30 days. You'll be asked to confirm once more.", in: app).exists)
         XCTAssertEqual(app.buttons[ID.cancelDelete].label, "Cancel")
         Thread.sleep(forTimeInterval: 0.6)
         shoot("tour-11-confirm", app)

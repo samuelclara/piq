@@ -113,7 +113,7 @@ enum ReviewCopy {
     static let title = "Review"
     static let sectionTitle = "Marked for deletion"
     static let sectionHint = "· tap to select"
-    static let deleteBody = "They move to Recently Deleted in Photos, where you can still recover them for 30 days. iPadOS will ask you to confirm once more."
+    static let deleteBody = "They move to Recently Deleted in Photos, where you can still recover them for 30 days. You'll be asked to confirm once more."
     static let deleteFailed = "Couldn't delete the photos"
     static let emptyTitle = "Trash is empty"
     static let emptyBody = "Swipe a photo left while sorting to mark it for deletion. Nothing leaves Photos until you empty the trash."

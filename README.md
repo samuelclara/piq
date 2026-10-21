@@ -5,17 +5,18 @@ swipe through each photo full screen (left marks it for deletion, right keeps it
 you marked, then empty Piq's trash in one go. Nothing leaves Photos until you empty the trash and
 confirm, and even then the photos go to Recently Deleted for 30 days.
 
-Native SwiftUI for iPadOS 17 and later, no third-party dependencies.
+Native SwiftUI for iPad and iPhone (iPadOS and iOS 17 and later), no third-party dependencies.
+On iPhone, Piq runs in portrait only.
 
 ## Requirements
 
 - Xcode 16 or later (built and tested with Xcode 26.6 and the iPadOS 26.5 SDK). The project uses
   Xcode's synchronized folders, so files you add under `Piq/` are picked up automatically.
-- An iPad running iPadOS 17 or later, or an iPad simulator.
+- An iPad or iPhone running iPadOS or iOS 17 or later, or a simulator of either.
 
 ## Run in the simulator
 
-Open `Piq.xcodeproj`, pick an iPad simulator, and press Run. Or from the command line:
+Open `Piq.xcodeproj`, pick an iPad or iPhone simulator, and press Run. Or from the command line:
 
 ```sh
 xcodebuild -project Piq.xcodeproj -scheme Piq \
@@ -48,9 +49,9 @@ few smaller ones, using the images in `Piq/Preview Content`). In Xcode, open
 `-PiqInMemoryStore` (also Debug only) runs against the real photo library with a fresh,
 in-memory session store, so end-to-end tests don't resume an earlier run's sessions.
 
-## Run on your iPad
+## Run on your iPad or iPhone
 
-1. **Turn on Developer Mode** on the iPad (*Settings › Privacy & Security › Developer Mode*),
+1. **Turn on Developer Mode** on the device (*Settings › Privacy & Security › Developer Mode*),
    then connect it to your Mac with a cable (or pair it over Wi‑Fi in Xcode's *Devices and
    Simulators* window).
 2. **Set your signing team.** Copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig`
@@ -61,15 +62,15 @@ in-memory session store, so end-to-end tests don't resume an earlier run's sessi
    Xcode then writes it into the project file.)
 3. **Make the bundle identifier yours.** `io.belleville.piq` must be unique to your team; if
    Xcode reports it's unavailable, change it (for example to `com.yourname.piq`).
-4. Choose your iPad as the run destination and press Run. With a free Apple ID, the first launch
-   needs you to trust your developer certificate on the iPad (*Settings › General › VPN & Device
+4. Choose your device as the run destination and press Run. With a free Apple ID, the first launch
+   needs you to trust your developer certificate on the device (*Settings › General › VPN & Device
    Management*).
 
 From the command line, once `Config/Local.xcconfig` is set (or by passing the team):
 
 ```sh
 xcodebuild -project Piq.xcodeproj -scheme Piq \
-  -destination 'platform=iOS,name=<your iPad name>' \
+  -destination 'platform=iOS,name=<your device name>' \
   -allowProvisioningUpdates DEVELOPMENT_TEAM=<your team ID> build
 ```
 

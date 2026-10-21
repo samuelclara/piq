@@ -48,6 +48,9 @@ struct AlbumPickerScreen: View {
                 // Return in the search field ends the search; it doesn't start sorting.
                 PickerBottomBar(layout: layout, acceptsReturn: !isSearchFocused)
             }
+            // In a narrow window (an iPhone), the stacked bar riding on the keyboard would leave
+            // the search results a sliver: the keyboard covers it instead while it's up.
+            .ignoresSafeArea(.keyboard, edges: layout.isNarrow ? .bottom : [])
         case .notDetermined:
             PickerMessagePage(layout: layout) {
                 WaitingForAccessView()

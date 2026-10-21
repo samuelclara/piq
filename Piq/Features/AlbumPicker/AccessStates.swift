@@ -86,7 +86,7 @@ struct AccessNeededView: View {
 
     private var message: String {
         if access == .restricted {
-            return "Screen Time or device management doesn't allow Piq to use Photos on this iPad. Piq needs it to show the photos of the album you pick so you can sort them."
+            return "Screen Time or device management doesn't allow Piq to use Photos on this device. Piq needs it to show the photos of the album you pick so you can sort them."
         }
         return "Piq shows the photos of the album you pick so you can sort them. Nothing leaves Photos until you empty Piq's trash and confirm."
     }
