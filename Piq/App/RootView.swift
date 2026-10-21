@@ -99,6 +99,7 @@ enum A11yID {
         static let emptyState = "review.emptyState"
         static let emptyStateButton = "review.emptyStateButton"
         static let closePreview = "review.closePreview"
+        static let previewPhoto = "review.previewPhoto"
         /// One per thumbnail.
         static func tile(_ assetID: String) -> String { "review.tile.\(assetID)" }
     }

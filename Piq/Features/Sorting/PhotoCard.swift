@@ -12,6 +12,9 @@ struct PhotoCard: View {
     let showsDetails: Bool
     /// The photo's decision, shown as a tag next to the chip; nil while it is unsorted.
     var verdict: Verdict?
+    /// How far the photo is zoomed in. Only the photo is: the chip, the tag and the loading state
+    /// stay where they are.
+    var zoom = PhotoZoom()
 
     /// Set once the card has been up a moment without its sharp image: the sharp image then fades
     /// in over what was seen (the preview or the placeholder). One that comes sooner (from the
@@ -42,9 +45,17 @@ struct PhotoCard: View {
                     .scaledToFill()
                     .transition(.opacity)
             }
+            if showsDetails {
+                ZoomDetailImage(assetID: assetID, isWanted: zoom.wantsDetail)
+            }
         }
         .frame(width: size.width, height: size.height)
+        .photoZoom(zoom)
+        .frame(width: size.width, height: size.height)
         .clipped()
+        // Clipping draws the zoomed photo inside the card, but it would still take touches over
+        // the whole of its magnified size: Delete and Keep, under it, would stop working.
+        .contentShape(Rectangle())
         .animation(hasWaited ? .easeOut(duration: 0.2) : nil, value: isSharp)
         .animation(.easeOut(duration: 0.15), value: slot?.preview != nil)
         .overlay(alignment: .top) { topRow }

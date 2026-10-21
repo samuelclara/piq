@@ -145,11 +145,11 @@ The default suites run against the mock library and need nothing but a booted iP
 DEST='platform=iOS Simulator,name=iPad Pro 11-inch (M5)'
 
 # Unit tests: session engine, persistence and migration, app model, races, library and access
-# changes, image loading policy, layouts (316 tests; 38 are gated or opt-in and skip by default)
+# changes, image loading policy, layouts (327 tests; 39 are gated or opt-in and skip by default)
 xcodebuild test -project Piq.xcodeproj -scheme Piq -destination "$DEST" -only-testing:PiqTests
 
 # UI tests on the mock library: every screen and state, quit and resume, keyboard,
-# accessibility audits, narrow windows (94 tests; 15 gated)
+# accessibility audits, narrow windows (98 tests; 15 gated)
 xcodebuild test -project Piq.xcodeproj -scheme Piq -destination "$DEST" -only-testing:PiqUITests
 
 # Screenshots of every screen and state, in landscape and portrait
@@ -194,6 +194,11 @@ Every screen also has SwiftUI previews that render from the mock photos in
   past the last photo Piq says how many are left, and Resume starts at the first unsorted one.
   Going back to a decided photo shows its decision; Delete or Keep replaces it.
 - **"Connected to Photos"** on the picker opens the Photos app.
+- **Zoom:** pinch a photo (sorting screen or Review's preview) to zoom up to 5×, or double-tap
+  to zoom in to 2.5× and back out. Zoomed in, one finger moves the photo instead of swiping it
+  (or, in the preview, instead of closing it); Delete, Keep and the arrow keys still decide. Past
+  1.2× the photo is shown from the original's pixels, up to 24 MP (96 MB), held only while it is
+  zoomed.
 - **Keyboard:** ← and → decide (holding a key decides once), ⌘[ and ⌘] go to the previous and
   next photo without deciding, ⌘Z undoes, Return starts sorting
   on the picker, ⌘F searches the albums (Return in the search field only ends the search;

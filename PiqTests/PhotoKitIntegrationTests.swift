@@ -424,6 +424,29 @@ final class PhotoKitIntegrationTests: XCTestCase {
         XCTAssertNil(gone)
     }
 
+    /// A zoomed photo is shown from the original's pixels: a 12 MP photo whole, a 48 MP one
+    /// scaled down to 24 MP, the same shape; never upscaled.
+    func testZoomedPhotosComeAtTheOriginalsResolutionUpTo24Megapixels() async throws {
+        let images = PhotoKitImageSource()
+        let landscape = try XCTUnwrap(layout.tripPhotos.first { $0.pixelWidth == 4032 && $0.pixelHeight == 3024 })
+        let large = try XCTUnwrap(layout.tripPhotos.first { $0.pixelWidth == 8064 })
+        let small = try XCTUnwrap(PhotoKitTestLibrary.items().first { $0.filename == "E2E_SMALL.JPG" }, "run Tools/PhotoKitE2E/prepare-library.sh")
+        for (photo, expected) in [
+            (landscape, CGSize(width: 4032, height: 3024)),
+            (large, PhotoKitImageSource.zoomImageSize(pixelWidth: 8064, pixelHeight: 6048)),
+            (small, CGSize(width: 1200, height: 900)),
+        ] {
+            let image = await images.zoomImage(for: photo.id)
+            let size = Self.pixelSize(of: try XCTUnwrap(image, photo.filename))
+            print("Zoom image of \(photo.filename): \(size)")
+            XCTAssertEqual(size.width, expected.width, accuracy: 2, "\(photo.filename): \(size)")
+            XCTAssertEqual(size.height, expected.height, accuracy: 2, "\(photo.filename): \(size)")
+            XCTAssertLessThanOrEqual(size.width * size.height, 24_010_000)
+        }
+        let gone = await images.zoomImage(for: "0A1B2C3D-0000-4000-8000-000000000005/L0/001")
+        XCTAssertNil(gone)
+    }
+
     /// Cancelling the task that waits for an image returns nil at once and leaves no request
     /// waiting forever (a leaked continuation would never let the task finish), whether the
     /// cancel comes before PhotoKit starts or while it decodes a 48 MP original.

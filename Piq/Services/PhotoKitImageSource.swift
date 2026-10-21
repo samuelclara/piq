@@ -106,12 +106,34 @@ final class PhotoKitImageSource: StoredPreviewSource {
         return await requestImage(.full, assetID, asset, size: fullImageSize, contentMode: .aspectFit, options: options)
     }
 
+    func zoomImage(for assetID: String) async -> UIImage? {
+        guard let asset = await asset(for: assetID) else { return nil }
+        let options = Self.fullImageOptions()
+        return await requestImage(.zoom, assetID, asset, size: Self.zoomImageSize(of: asset), contentMode: .aspectFit, options: options)
+    }
+
     func startCachingFullImages(for assetIDs: [String]) {
         updateCaching(of: assetIDs, start: true)
     }
 
     func stopCachingFullImages(for assetIDs: [String]) {
         updateCaching(of: assetIDs, start: false)
+    }
+
+    /// The most pixels a zoomed photo is decoded at: a 24 MP image holds 96 MB, where a 48 MP
+    /// original would hold 190 MB. On a full-width landscape card that is one image pixel per
+    /// screen pixel at about 2.5×; past it, the image is magnified.
+    nonisolated static let zoomImagePixels: CGFloat = 24_000_000
+
+    /// The photo's own size, scaled down to `zoomImagePixels` if it is larger.
+    static func zoomImageSize(of asset: PHAsset) -> CGSize {
+        zoomImageSize(pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight)
+    }
+
+    nonisolated static func zoomImageSize(pixelWidth: Int, pixelHeight: Int) -> CGSize {
+        let width = CGFloat(max(pixelWidth, 1)), height = CGFloat(max(pixelHeight, 1))
+        let factor = min(1, (zoomImagePixels / (width * height)).squareRoot())
+        return CGSize(width: (width * factor).rounded(.down), height: (height * factor).rounded(.down))
     }
 
     // MARK: Private
@@ -259,7 +281,7 @@ struct ImageDelivery: Sendable {
 
 /// The kinds of image requests, named for Instruments.
 private enum RequestKind {
-    case thumbnail, storedPreview, preview, full
+    case thumbnail, storedPreview, preview, full, zoom
 
     var name: StaticString {
         switch self {
@@ -267,6 +289,7 @@ private enum RequestKind {
         case .storedPreview: "Stored preview"
         case .preview: "Preview"
         case .full: "Full image"
+        case .zoom: "Zoom image"
         }
     }
 }

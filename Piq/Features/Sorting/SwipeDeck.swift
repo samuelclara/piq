@@ -58,6 +58,8 @@ final class SwipeDeck {
     /// place (see `keepsUndoTarget`), and let go once the loader has the photo sharp again or the
     /// screen goes away.
     private(set) var lastDeparted: PhotoSlot?
+    /// The photo whose card is zoomed in, as its card reports it.
+    private(set) var zoomedID: String?
 
     /// Mirrors the Reduce Motion setting: no flights, decisions commit with a quick crossfade.
     @ObservationIgnored var reduceMotion = false
@@ -214,6 +216,22 @@ final class SwipeDeck {
             draggedID = nil
             dragTranslation = .zero
         }
+    }
+
+    // MARK: Zooming
+
+    /// The card of `id` is zoomed in, or no longer.
+    func setZoomed(_ isZoomed: Bool, photo id: String) {
+        if isZoomed {
+            zoomedID = id
+        } else if zoomedID == id {
+            zoomedID = nil
+        }
+    }
+
+    /// Whether the photo on screen is zoomed in.
+    var isCurrentPhotoZoomed: Bool {
+        zoomedID != nil && zoomedID == session.state.currentAssetID
     }
 
     // MARK: Deciding

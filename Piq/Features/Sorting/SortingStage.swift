@@ -136,17 +136,21 @@ struct SortingStage: View {
         return .asymmetric(insertion: .opacity, removal: removal)
     }
 
-    /// What the card shows besides the photo: the iCloud download, or that the sharp image
-    /// couldn't be loaded.
+    /// What the card shows besides the photo: that it is zoomed in, the iCloud download, or that
+    /// the sharp image couldn't be loaded.
     private var accessibilityValue: String {
-        guard let id = deck.session.state.currentAssetID, let slot = deck.slot(for: id), !slot.isSharp else { return "" }
+        [deck.isCurrentPhotoZoomed ? "Zoomed in" : nil, loadingValue].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    private var loadingValue: String? {
+        guard let id = deck.session.state.currentAssetID, let slot = deck.slot(for: id), !slot.isSharp else { return nil }
         if slot.didFail {
             return "Couldn't load full resolution"
         }
         if let progress = slot.downloadProgress {
             return "Downloading from iCloud, \(progress.formatted(.percent.precision(.fractionLength(0))))"
         }
-        return ""
+        return nil
     }
 
     /// Runs a VoiceOver action, then reads out the photo now on screen. The focus stays on the

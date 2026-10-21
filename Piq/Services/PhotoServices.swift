@@ -47,4 +47,14 @@ protocol PhotoImageSource: AnyObject, Sendable {
     /// Prefetch hints for upcoming full images.
     func startCachingFullImages(for assetIDs: [String])
     func stopCachingFullImages(for assetIDs: [String])
+    /// A sharper image than `fullImage`, for a photo zoomed in on: the original's resolution, up
+    /// to a limit. Not cached; the caller holds it only while the photo is zoomed.
+    func zoomImage(for assetID: String) async -> UIImage?
+}
+
+extension PhotoImageSource {
+    /// Sources without anything sharper than the full image serve that.
+    func zoomImage(for assetID: String) async -> UIImage? {
+        await fullImage(for: assetID) { _ in }
+    }
 }
