@@ -248,6 +248,19 @@ final class AppModel {
         return session
     }
 
+    /// Cancels the album's session from the albums: its decisions, its place and its trash list
+    /// are forgotten, and the album offers "Start sorting" again. Photos is left as it is. The
+    /// record stays (reset, as `restart(with:)` does), so a controller holding it never touches a
+    /// deleted one.
+    func cancelSession(albumID: String) {
+        guard path.isEmpty, !isOpeningAlbum,
+              let session = controllers[albumID] ?? store.session(albumID: albumID).map(register),
+              session.resumePoint != nil, !session.isEmptyingTrash else { return }
+        session.restart(with: session.state.assetIDs)
+        sessions[albumID] = session.record
+        toasts.show("Session cancelled")
+    }
+
     /// Wraps `record` in its controller, from now on the only way the session changes.
     private func register(_ record: SortingSession) -> SessionController {
         let controller = SessionController(record: record, store: store, library: library)

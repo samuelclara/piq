@@ -309,6 +309,93 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(try savedSessions(in: app.container).first?.state, session.state)
     }
 
+    // MARK: Cancelling a session
+
+    func testCancellingASessionStartsTheAlbumOver() async throws {
+        let (app, library) = try await startedApp()
+        let lisbon = try album("Weekend in Lisbon", in: app)
+        await app.openAlbum(lisbon)
+        try XCTUnwrap(app.activeSession).sortNext([.keep, .delete, .keep, .delete])
+        app.returnToAlbums()
+        XCTAssertEqual(app.resumePoint(for: lisbon.id), ResumePoint(position: 5, total: 36, markedCount: 2, isComplete: false))
+
+        app.cancelSession(albumID: lisbon.id)
+
+        XCTAssertNil(app.resumePoint(for: lisbon.id), "the album offers Start sorting again")
+        XCTAssertEqual(PickerBottomBar.startTitle(for: lisbon, resume: app.resumePoint(for: lisbon.id)), "Start sorting · 36 photos")
+        XCTAssertEqual(app.toasts.current?.message, "Session cancelled")
+        XCTAssertEqual(library.photoIDs(inAlbum: lisbon.id).count, 36, "nothing is deleted from Photos")
+        let saved = try XCTUnwrap(try savedSessions(in: app.container).first { $0.albumID == lisbon.id }, "saved right away")
+        XCTAssertEqual(saved.state.sortedCount, 0)
+        XCTAssertEqual(saved.state.markedCount, 0)
+        XCTAssertFalse(saved.state.canUndo)
+
+        await app.openAlbum(lisbon)
+
+        XCTAssertEqual(app.path, [.sorting(albumID: lisbon.id)])
+        let session = try XCTUnwrap(app.activeSession)
+        XCTAssertEqual(session.state.position, 1)
+        XCTAssertEqual(session.state.markedCount, 0)
+        XCTAssertFalse(session.state.canUndo, "Undo can't bring a cancelled decision back")
+    }
+
+    func testCancellingAFinishedSessionForgetsItsTrash() async throws {
+        let (app, _) = try await startedApp()
+        let family = try album("Family", in: app)
+        try await sortEverything(in: family, of: app, marking: 3)
+        app.returnToAlbums()
+
+        app.cancelSession(albumID: family.id)
+
+        XCTAssertNil(app.resumePoint(for: family.id))
+        await app.openAlbum(family)
+        XCTAssertEqual(app.path, [.sorting(albumID: family.id)], "sorting from the first photo, not Review")
+        XCTAssertEqual(app.activeSession?.state.markedCount, 0)
+    }
+
+    func testASessionSavedByAnEarlierLaunchCanBeCancelled() async throws {
+        let url = URL.temporaryDirectory.appending(path: "PiqTests-\(UUID().uuidString).store")
+        defer { Self.removeStore(at: url) }
+        do {
+            let app = try await launchApp(storeURL: url)
+            await app.openAlbum(try album("Family", in: app))
+            try XCTUnwrap(app.activeSession).sortNext([.delete, .keep])
+            app.returnToAlbums()
+        }
+
+        let app = try await launchApp(storeURL: url)
+        let family = try album("Family", in: app)
+        XCTAssertNotNil(app.resumePoint(for: family.id))
+
+        app.cancelSession(albumID: family.id)
+
+        XCTAssertNil(app.resumePoint(for: family.id))
+        XCTAssertEqual(try savedSessions(in: app.container).map(\.state.sortedCount), [0])
+    }
+
+    func testOnlyTheAlbumsCanCancelASession() async throws {
+        let (app, _) = try await startedApp()
+        let lisbon = try album("Weekend in Lisbon", in: app)
+        await app.openAlbum(lisbon)
+        try XCTUnwrap(app.activeSession).sortNext([.keep, .delete])
+
+        app.cancelSession(albumID: lisbon.id)
+        XCTAssertEqual(app.activeSession?.state.sortedCount, 2, "not while the session is on screen")
+
+        app.returnToAlbums()
+        let family = try album("Family", in: app)
+        app.cancelSession(albumID: family.id)
+        XCTAssertNil(app.toasts.current, "an album without a session has nothing to cancel")
+        XCTAssertNotNil(app.resumePoint(for: lisbon.id))
+    }
+
+    func testTheCancelMessageSaysWhatIsForgotten() {
+        let marked = ResumePoint(position: 5, total: 36, markedCount: 4, isComplete: false)
+        XCTAssertEqual(PickerBottomBar.cancelMessage(for: marked), "Piq forgets every decision you made in this album, including the 4 photos marked for deletion, and it starts over. Nothing changes in Photos.")
+        let kept = ResumePoint(position: 3, total: 36, markedCount: 0, isComplete: false)
+        XCTAssertEqual(PickerBottomBar.cancelMessage(for: kept), "Piq forgets every decision you made in this album, and it starts over. Nothing changes in Photos.")
+    }
+
     // MARK: Selection and relaunch
 
     func testSelectionSurvivesReloadsAndFallsBackToTheUnfinishedAlbum() async throws {

@@ -72,6 +72,7 @@ enum A11yID {
     enum Picker {
         static let grid = "picker.grid"
         static let startButton = "picker.start"
+        static let cancelSession = "picker.cancelSession"
         static let openSettings = "picker.openSettings"
         static let changeSelection = "picker.changeSelection"
         /// One per album tile.
