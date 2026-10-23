@@ -156,7 +156,8 @@ extension PhotoKitLibraryClient: PHPhotoLibraryChangeObserver {
 final class LibraryWatch: @unchecked Sendable {
     /// PhotoKit fetch results are immutable snapshots, safe to read from any thread.
     struct Snapshot: @unchecked Sendable {
-        /// Each listed album's photos, as the listing fetched them.
+        /// Each listed album's photos and videos, as the listing fetched them (a video added or
+        /// removed reloads the list too, which costs a listing and changes nothing).
         var photos: [PHFetchResult<PHAsset>] = []
         /// The album tree: the top level and every folder.
         var folders: [PHFetchResult<PHCollection>] = []
@@ -394,19 +395,32 @@ enum PhotoKitQueries {
 private extension PhotoKitQueries.AlbumListing {
     /// Lists `collection`: its photos newest first give the count, the cover (the newest) and
     /// the cover's capture date.
+    ///
+    /// The album is fetched with its videos and the photos counted from that: PhotoKit takes
+    /// about 45 ms to fetch an album with the photos-only predicate, against 2 ms without it,
+    /// which made listing 274 albums take 16 s on an iPhone (and kept every other request
+    /// waiting meanwhile). The counts and covers are the same.
     mutating func add(_ collection: PHAssetCollection, kind: AlbumSummary.Kind, title: String, creationRank: Int? = nil) {
-        let photos = PHAsset.fetchAssets(in: collection, options: PhotoKitQueries.photoOptions(oldestFirst: false))
-        let newest = photos.firstObject
+        let options = PhotoKitQueries.photoOptions(oldestFirst: false)
+        options.predicate = nil
+        let assets = PHAsset.fetchAssets(in: collection, options: options)
+        var newest: PHAsset?
+        assets.enumerateObjects { asset, _, stop in
+            if asset.mediaType == .image {
+                newest = asset
+                stop.pointee = true
+            }
+        }
         albums.append(AlbumSummary(
             id: collection.localIdentifier,
             title: title,
             kind: kind,
-            photoCount: photos.count,
+            photoCount: assets.countOfAssets(with: .image),
             coverAssetID: newest?.localIdentifier,
             creationRank: creationRank,
             newestPhotoDate: newest?.creationDate
         ))
-        snapshot.photos.append(photos)
+        snapshot.photos.append(assets)
     }
 }
 
